@@ -1,0 +1,3 @@
+Could not extract facebook post (even with cookies file)
+Instagram posts still doesnt work, but reels are being extracted successfully (even with cookies file)
+
