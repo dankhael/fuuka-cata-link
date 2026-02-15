@@ -1,0 +1,14 @@
+services:
+  telegram-bot:
+    build: .
+    container_name: fuuka-cata-link-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - bot-logs:/app/logs
+      # Uncomment for authenticated scraping (Instagram, Facebook):
+      # - ./cookies.txt:/app/cookies.txt:ro
+
+volumes:
+  bot-logs:
