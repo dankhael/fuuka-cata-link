@@ -54,10 +54,12 @@ async def handle_media_link(message: Message, detected_links: list[DetectedLink]
             await message.reply(f"Failed to extract media from {link.platform} link.")
             continue
 
-        await _send_result(message, result)
+        await _send_result(message, result, has_spoiler=link.is_spoiler)
 
 
-async def _send_result(message: Message, result: ScrapedMedia) -> None:
+async def _send_result(
+    message: Message, result: ScrapedMedia, *, has_spoiler: bool = False
+) -> None:
     """Send the scraped result back to the chat."""
     if not result.has_media:
         # Text-only post
@@ -89,9 +91,9 @@ async def _send_result(message: Message, result: ScrapedMedia) -> None:
         file = BufferedInputFile(item.data, filename=f"media.{ext}")
 
         if item.media_type == MediaType.VIDEO:
-            await message.reply_video(video=file, caption=caption)
+            await message.reply_video(video=file, caption=caption, has_spoiler=has_spoiler)
         else:
-            await message.reply_photo(photo=file, caption=caption)
+            await message.reply_photo(photo=file, caption=caption, has_spoiler=has_spoiler)
         return
 
     # Multiple media items — send as a media group (album)
@@ -102,8 +104,12 @@ async def _send_result(message: Message, result: ScrapedMedia) -> None:
         item_caption = caption if i == 0 else None
 
         if item.media_type == MediaType.VIDEO:
-            media_group.append(InputMediaVideo(media=file, caption=item_caption))
+            media_group.append(
+                InputMediaVideo(media=file, caption=item_caption, has_spoiler=has_spoiler)
+            )
         else:
-            media_group.append(InputMediaPhoto(media=file, caption=item_caption))
+            media_group.append(
+                InputMediaPhoto(media=file, caption=item_caption, has_spoiler=has_spoiler)
+            )
 
     await message.reply_media_group(media=media_group)

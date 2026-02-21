@@ -20,6 +20,7 @@ class Platform(StrEnum):
 class DetectedLink:
     url: str
     platform: Platform
+    is_spoiler: bool = False
 
 
 # Patterns for each platform. Order matters — first match wins for a given URL.
