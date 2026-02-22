@@ -125,15 +125,56 @@ Some platforms (Instagram, Facebook) require cookies for reliable extraction. To
 
 ## Development
 
+### Running with a Test Bot
+
+The project includes a `.env.test` file for running the bot in a test environment without touching your production `.env`. The bot supports an `ENV_FILE` environment variable to select which env file to load.
+
+1. Create a **separate test bot** via [@BotFather](https://t.me/BotFather)
+2. Create a private group or channel for testing and add the bot
+3. Get the chat ID (send a message in the group, then check `https://api.telegram.org/bot<token>/getUpdates`)
+4. Edit `.env.test` with your test bot token, test chat ID, and set `LOG_LEVEL=DEBUG` for verbose output
+5. Run the bot:
+
 ```bash
-# Run tests
+pip install -e ".[dev]"
+
+# Linux / macOS
+ENV_FILE=.env.test python -m src.main
+
+# Windows (cmd)
+set ENV_FILE=.env.test && python -m src.main
+
+# Windows (PowerShell)
+$env:ENV_FILE=".env.test"; python -m src.main
+```
+
+Setting `LOG_LEVEL=DEBUG` gives verbose output for all scraper activity, fallback chains, and download progress. `ALLOWED_CHATS` restricts the bot to your test group so it won't respond in other chats.
+
+### Running the Test Suite
+
+No `.env` file or real bot token is needed — the test suite automatically sets a dummy `TELEGRAM_BOT_TOKEN` via `conftest.py`.
+
+```bash
+# Run all tests
 pytest
 
 # Run tests with coverage
 pytest --cov=src --cov-report=html
 
+# Run a specific test file
+pytest tests/test_scrapers/test_twitter.py
+```
+
+> **Note:** `asyncio_mode = "auto"` is configured in `pyproject.toml`, so async tests are auto-detected — no `@pytest.mark.asyncio` decorator needed.
+
+### Linting & Formatting
+
+```bash
 # Lint
 ruff check src/ tests/
+
+# Auto-fix lint issues
+ruff check --fix src/ tests/
 
 # Format
 ruff format src/ tests/
