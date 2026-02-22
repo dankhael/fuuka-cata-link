@@ -38,6 +38,8 @@ class ScrapedMedia:
     caption: str | None = None
     media_items: list[MediaItem] = field(default_factory=list)
     method_used: str = "unknown"
+    referenced_post: ScrapedMedia | None = None
+    reference_type: str | None = None  # "reply" | "quote"
 
     @property
     def has_media(self) -> bool:

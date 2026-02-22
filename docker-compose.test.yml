@@ -1,0 +1,6 @@
+services:
+  telegram-bot:
+    build: .
+    container_name: fuuka-cata-link-bot-test
+    env_file:
+      - .env.test
