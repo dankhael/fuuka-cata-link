@@ -7,6 +7,7 @@ from aiogram.types import (
     InputMediaPhoto,
     InputMediaVideo,
     Message,
+    ReplyParameters,
 )
 
 from src.bot.filters import AllowedChat, ContainsSupportedLink
@@ -60,14 +61,51 @@ async def handle_media_link(message: Message, detected_links: list[DetectedLink]
 async def _send_result(
     message: Message, result: ScrapedMedia, *, has_spoiler: bool = False
 ) -> None:
-    """Send the scraped result back to the chat."""
-    if not result.has_media:
-        # Text-only post
-        text = format_text_post(result)
-        await message.reply(truncate(text, max_len=4096))
-        return
+    """Send the scraped result back to the chat.
 
-    # Download items that don't already have data (pre-downloaded by yt-dlp scrapers)
+    If the result has a referenced_post (reply or quote), sends the referenced
+    post first, then sends the main result as a Telegram reply to it.
+    """
+    reply_to_message_id: int | None = None
+
+    if result.referenced_post:
+        ref_msg = await _send_single_result(
+            message, result.referenced_post, has_spoiler=has_spoiler
+        )
+        if ref_msg is not None:
+            reply_to_message_id = ref_msg.message_id
+
+    await _send_single_result(
+        message, result,
+        reply_to_message_id=reply_to_message_id,
+        has_spoiler=has_spoiler,
+    )
+
+
+async def _send_single_result(
+    message: Message,
+    result: ScrapedMedia,
+    reply_to_message_id: int | None = None,
+    has_spoiler: bool = False,
+) -> Message | None:
+    """Send a single ScrapedMedia and return the sent Message.
+
+    When *reply_to_message_id* is ``None`` the message replies to the user's
+    original message (default ``message.reply_*`` behaviour).  When set, it
+    uses ``message.answer_*`` with an explicit ``ReplyParameters`` so the bot
+    message replies to a different message in the chat.
+    """
+    reply_params = (
+        ReplyParameters(message_id=reply_to_message_id) if reply_to_message_id else None
+    )
+
+    if not result.has_media:
+        text = format_text_post(result)
+        if reply_params:
+            return await message.answer(truncate(text, max_len=4096), reply_parameters=reply_params)
+        return await message.reply(truncate(text, max_len=4096))
+
+    # Download items that don't already have data
     items_needing_download = [item for item in result.media_items if item.data is None]
     items_already_downloaded = [item for item in result.media_items if item.data is not None]
 
@@ -80,11 +118,11 @@ async def _send_result(
 
     if not downloaded:
         await message.reply("Could not download media from this link.")
-        return
+        return None
 
     caption = truncate(format_caption(result))
 
-    # Single media item — send directly
+    # Single media item
     if len(downloaded) == 1:
         item = downloaded[0]
         ext = "mp4" if item.media_type == MediaType.VIDEO else "jpg"
@@ -112,4 +150,10 @@ async def _send_result(
                 InputMediaPhoto(media=file, caption=item_caption, has_spoiler=has_spoiler)
             )
 
-    await message.reply_media_group(media=media_group)
+    if reply_params:
+        sent = await message.answer_media_group(
+            media=media_group, reply_parameters=reply_params
+        )
+    else:
+        sent = await message.reply_media_group(media=media_group)
+    return sent[0] if sent else None

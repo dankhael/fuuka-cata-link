@@ -20,8 +20,10 @@ def format_caption(result: ScrapedMedia) -> str:
         parts.append(result.caption)
 
     if result.has_media:
-        xcancel_url = result.original_url.replace("x.com", "xcancel.com")
-        parts.append(f'\n<a href="{xcancel_url}">Link</a>')
+        # If the original url is from x.com, replace it with xcancel.com
+        if result.original_url.startswith("https://x.com/"):
+            result.original_url = result.original_url.replace("x.com/", "xcancel.com/")
+        parts.append(f'\n<a href="{result.original_url}">Link</a>')
 
     return "\n".join(parts) if parts else result.original_url
 
