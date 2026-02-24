@@ -34,5 +34,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_file: str = "logs/bot.log"
 
+    # Debug mode — enables verbose per-step logging in scrapers
+    debug_mode: bool = False
+
 
 settings = Settings()  # type: ignore[call-arg]
