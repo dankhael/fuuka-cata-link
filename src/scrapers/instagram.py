@@ -25,9 +25,11 @@ class InstagramScraper(BaseScraper):
         return Platform.INSTAGRAM
 
     async def _primary_extract(self, url: str) -> ScrapedMedia:
+        """Extract Instagram media: yt-dlp (videos) → gallery-dl (images) → embed page."""
         extra_args = ["--cookies", str(settings.cookies_file)] if settings.cookies_file else []
         extra_args += ["--no-check-certificates"]
 
+        # Phase 1: yt-dlp — handles reels/videos reliably
         try:
             result = await ytdlp_download(url, extra_args=extra_args)
             if result.data:
@@ -44,81 +46,127 @@ class InstagramScraper(BaseScraper):
         except Exception as e:
             logger.debug("instagram_ytdlp_failed", url=url, error=str(e))
 
-        return await self._smart_proxy_fallback(url)
+        # Phase 2: gallery-dl — handles image posts and carousels
+        try:
+            return await self._gallery_dl_extract(url)
+        except Exception as e:
+            logger.debug("instagram_gallery_dl_failed", url=url, error=str(e))
 
-    PROXY_SERVICES = [
-        "https://imginn.com",
-        "https://snapinsta.app",
-        "https://kkinstagram.com",
-        "https://igram.world",
-    ]
+        # Phase 3: embed page fallback — lightweight, no extra deps
+        return await self._embed_fallback(url)
 
-    async def _smart_proxy_fallback(self, url: str) -> ScrapedMedia:
-        for base_url in self.PROXY_SERVICES:
-            try:
-                proxy_url = re.sub(
-                    r"https?://(?:www\.)?instagram\.com",
-                    base_url, url,
-                )
+    async def _gallery_dl_extract(self, url: str) -> ScrapedMedia:
+        """Extract Instagram media via gallery-dl."""
+        from src.utils.gallery_dl import gallery_dl_download
 
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        proxy_url,
+        result = await gallery_dl_download(url, cookies_file=settings.cookies_file)
+
+        media_items: list[MediaItem] = []
+        for f in result.files:
+            media_type = MediaType.VIDEO if f.is_video else MediaType.IMAGE
+            item = MediaItem(url=url, media_type=media_type)
+            item.data = f.data
+            media_items.append(item)
+
+        if not media_items:
+            raise RuntimeError("gallery-dl returned no usable media for Instagram")
+
+        return ScrapedMedia(
+            platform=self.platform,
+            original_url=url,
+            author=result.uploader,
+            caption=result.description or result.title,
+            media_items=media_items,
+        )
+
+    async def _embed_fallback(self, url: str) -> ScrapedMedia:
+        """Extract images from Instagram's embed page.
+
+        The /embed/captioned/ endpoint returns simpler HTML that often includes
+        og:image and CDN URLs even without authentication.
+        """
+        shortcode_match = re.search(r"/(?:p|reel|reels)/([A-Za-z0-9_-]+)", url)
+        if not shortcode_match:
+            raise RuntimeError("Could not extract Instagram shortcode from URL")
+
+        shortcode = shortcode_match.group(1)
+        embed_url = f"https://www.instagram.com/p/{shortcode}/embed/captioned/"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                embed_url,
+                headers={
+                    "User-Agent": _USER_AGENT,
+                    "Accept": "text/html,application/xhtml+xml",
+                },
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                resp.raise_for_status()
+                html = await resp.text()
+
+        # Extract image URLs from embed page
+        image_urls: list[str] = []
+
+        # og:image meta tag (most reliable single-image source)
+        og_matches = re.findall(
+            r'<meta\s+[^>]*?property=["\']og:image["\'][^>]*?content=["\']([^"\']+)["\']',
+            html,
+            re.IGNORECASE,
+        )
+        image_urls.extend(og_matches)
+
+        # Instagram CDN image URLs in the page body
+        cdn_urls = re.findall(
+            r'(https?://(?:scontent|instagram)[^"\'\\>\s]+\.(?:jpg|jpeg|png|webp))',
+            html,
+            re.IGNORECASE,
+        )
+        image_urls.extend(cdn_urls)
+
+        # Deduplicate
+        seen: set[str] = set()
+        unique_urls: list[str] = []
+        for img_url in image_urls:
+            img_url = img_url.replace("&amp;", "&")
+            if img_url not in seen:
+                seen.add(img_url)
+                unique_urls.append(img_url)
+
+        if not unique_urls:
+            raise RuntimeError("Instagram embed page returned no image URLs")
+
+        # Download images
+        media_items: list[MediaItem] = []
+        async with aiohttp.ClientSession() as dl_session:
+            for img_url in unique_urls[:10]:
+                try:
+                    async with dl_session.get(
+                        img_url,
                         headers={"User-Agent": _USER_AGENT},
-                        timeout=aiohttp.ClientTimeout(total=20),
+                        timeout=aiohttp.ClientTimeout(total=15),
                     ) as resp:
-                        html = await resp.text()
-
-                # Extract media URLs (og:image + direct CDN links)
-                media_urls = re.findall(
-                    r'(https?://[^"\']+\.(?:jpg|jpeg|png|mp4|webp))', html, re.IGNORECASE
-                )
-                media_urls += re.findall(
-                    r'content=["\']([^"\']+\.(?:jpg|jpeg|png|webp))', html
-                )
-
-                if not media_urls:
-                    continue
-
-                # Dedup + filter to real Instagram CDN media
-                media_urls = list(dict.fromkeys(
-                    u for u in media_urls if "scontent" in u or "cdn" in u
-                ))
-
-                media_items: list[MediaItem] = []
-                for m_url in media_urls[:8]:
-                    try:
-                        async with aiohttp.ClientSession() as dl_session:
-                            async with dl_session.get(
-                                m_url,
-                                headers={"User-Agent": _USER_AGENT},
-                                timeout=aiohttp.ClientTimeout(total=15),
-                            ) as dl_resp:
-                                data = await dl_resp.read()
-                    except Exception:
-                        continue
-                    if data and len(data) > 15_000:
-                        mtype = MediaType.VIDEO if m_url.endswith(".mp4") else MediaType.IMAGE
-                        item = MediaItem(url=m_url, media_type=mtype)
+                        data = await resp.read()
+                    if data and len(data) > 5_000:
+                        item = MediaItem(url=img_url, media_type=MediaType.IMAGE)
                         item.data = data
                         media_items.append(item)
+                except Exception:
+                    continue
 
-                if media_items:
-                    cap_match = re.search(
-                        r'<meta\s+[^>]*?property=["\']og:description["\'][^>]*?content=["\']([^"\']*)["\']',
-                        html, re.IGNORECASE,
-                    )
-                    caption = cap_match.group(1) if cap_match else None
+        if not media_items:
+            raise RuntimeError("Could not download any images from Instagram embed")
 
-                    return ScrapedMedia(
-                        platform=self.platform,
-                        original_url=url,
-                        author=None,
-                        caption=caption,
-                        media_items=media_items,
-                    )
-            except Exception as e:
-                logger.warning("instagram_proxy_failed", proxy=base_url, error=str(e))
-                continue
+        cap_match = re.search(
+            r'<meta\s+[^>]*?property=["\']og:description["\'][^>]*?content=["\']([^"\']*)["\']',
+            html,
+            re.IGNORECASE,
+        )
+        caption = cap_match.group(1) if cap_match else None
 
-        raise RuntimeError("All Instagram proxies failed")
+        return ScrapedMedia(
+            platform=self.platform,
+            original_url=url,
+            author=None,
+            caption=caption,
+            media_items=media_items,
+        )
