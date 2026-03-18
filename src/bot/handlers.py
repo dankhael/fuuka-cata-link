@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import structlog
 from aiogram import Router
+from aiogram.filters import Command
 from aiogram.types import (
     BufferedInputFile,
     InputMediaPhoto,
@@ -34,9 +35,17 @@ def setup_scrapers() -> None:
     logger.info("scrapers_loaded", platforms=list(_SCRAPER_MAP.keys()))
 
 
-@router.message(AllowedChat(), ContainsSupportedLink())
-async def handle_media_link(message: Message, detected_links: list[DetectedLink]) -> None:
-    """Process a message that contains one or more supported social media links."""
+async def _process_links(
+    message: Message,
+    detected_links: list[DetectedLink],
+    *,
+    strip_referenced: bool = False,
+) -> None:
+    """Scrape each detected link and send results.
+
+    When *strip_referenced* is True, any referenced_post (quote/reply parent)
+    is stripped before sending — the bot sends only the linked post itself.
+    """
     for link in detected_links:
         scraper = _SCRAPER_MAP.get(link.platform)
         if scraper is None:
@@ -55,7 +64,29 @@ async def handle_media_link(message: Message, detected_links: list[DetectedLink]
             await message.reply(f"Failed to extract media from {link.platform} link.")
             continue
 
+        if strip_referenced:
+            result.referenced_post = None
+            result.reference_type = None
+
         await _send_result(message, result, has_spoiler=link.is_spoiler)
+
+
+@router.message(Command("ignore"), AllowedChat(), ContainsSupportedLink())
+async def handle_ignore(message: Message, detected_links: list[DetectedLink]) -> None:
+    """Silently ignore a supported link — do not scrape or reply."""
+    logger.debug("link_ignored", urls=[link.url for link in detected_links])
+
+
+@router.message(Command("noreply"), AllowedChat(), ContainsSupportedLink())
+async def handle_noreply(message: Message, detected_links: list[DetectedLink]) -> None:
+    """Scrape the link but strip the referenced post (quote/reply parent)."""
+    await _process_links(message, detected_links, strip_referenced=True)
+
+
+@router.message(AllowedChat(), ContainsSupportedLink())
+async def handle_media_link(message: Message, detected_links: list[DetectedLink]) -> None:
+    """Process a message that contains one or more supported social media links."""
+    await _process_links(message, detected_links)
 
 
 async def _send_result(
