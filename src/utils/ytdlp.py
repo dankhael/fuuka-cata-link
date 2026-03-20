@@ -31,6 +31,7 @@ class YtdlpResult:
     data: bytes | None = None  # downloaded file content
     thumbnail_url: str | None = None
     is_video: bool = True
+    is_animation: bool = False  # True for GIFs
 
 
 async def ytdlp_info(url: str, extra_args: list[str] | None = None) -> dict:
@@ -112,7 +113,8 @@ async def ytdlp_download(
             else:
                 logger.warning("ytdlp_file_too_large", size_mb=round(file_size / 1024 / 1024, 1))
 
-        is_video = ext in ("mp4", "webm", "mkv", "mov", "avi", "flv")
+        is_animation = ext in ("gif", "gifv")
+        is_video = ext in ("mp4", "webm", "mkv", "mov", "avi", "flv") and not is_animation
 
         return YtdlpResult(
             title=info.get("title"),
@@ -122,4 +124,5 @@ async def ytdlp_download(
             data=data,
             thumbnail_url=info.get("thumbnail"),
             is_video=is_video,
+            is_animation=is_animation,
         )

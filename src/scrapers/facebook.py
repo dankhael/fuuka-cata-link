@@ -111,7 +111,12 @@ class FacebookScraper(BaseScraper):
             result = await ytdlp_download(url, cookies_file=settings.cookies_file)
             if result.data:
                 _dbg("fb_phase1_ytdlp_ok", size=len(result.data), is_video=result.is_video)
-                media_type = MediaType.VIDEO if result.is_video else MediaType.IMAGE
+                if result.is_animation:
+                    media_type = MediaType.ANIMATION
+                elif result.is_video:
+                    media_type = MediaType.VIDEO
+                else:
+                    media_type = MediaType.IMAGE
                 item = MediaItem(url=url, media_type=media_type)
                 item.data = result.data
                 return ScrapedMedia(

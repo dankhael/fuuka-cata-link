@@ -33,7 +33,12 @@ class InstagramScraper(BaseScraper):
         try:
             result = await ytdlp_download(url, extra_args=extra_args)
             if result.data:
-                media_type = MediaType.VIDEO if result.is_video else MediaType.IMAGE
+                if result.is_animation:
+                    media_type = MediaType.ANIMATION
+                elif result.is_video:
+                    media_type = MediaType.VIDEO
+                else:
+                    media_type = MediaType.IMAGE
                 item = MediaItem(url=url, media_type=media_type)
                 item.data = result.data
                 return ScrapedMedia(
@@ -63,7 +68,12 @@ class InstagramScraper(BaseScraper):
 
         media_items: list[MediaItem] = []
         for f in result.files:
-            media_type = MediaType.VIDEO if f.is_video else MediaType.IMAGE
+            if f.is_animation:
+                media_type = MediaType.ANIMATION
+            elif f.is_video:
+                media_type = MediaType.VIDEO
+            else:
+                media_type = MediaType.IMAGE
             item = MediaItem(url=url, media_type=media_type)
             item.data = f.data
             media_items.append(item)

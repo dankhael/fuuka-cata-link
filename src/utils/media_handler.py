@@ -74,3 +74,7 @@ def is_image(item: MediaItem) -> bool:
 
 def is_video(item: MediaItem) -> bool:
     return item.media_type == MediaType.VIDEO
+
+
+def is_animation(item: MediaItem) -> bool:
+    return item.media_type == MediaType.ANIMATION

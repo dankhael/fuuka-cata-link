@@ -5,6 +5,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import (
     BufferedInputFile,
+    InputMediaAnimation,
     InputMediaPhoto,
     InputMediaVideo,
     Message,
@@ -156,11 +157,18 @@ async def _send_single_result(
     # Single media item
     if len(downloaded) == 1:
         item = downloaded[0]
-        ext = "mp4" if item.media_type == MediaType.VIDEO else "jpg"
+        if item.media_type == MediaType.VIDEO:
+            ext = "mp4"
+        elif item.media_type == MediaType.ANIMATION:
+            ext = "gif"
+        else:
+            ext = "jpg"
         file = BufferedInputFile(item.data, filename=f"media.{ext}")
 
         if item.media_type == MediaType.VIDEO:
             await message.reply_video(video=file, caption=caption, has_spoiler=has_spoiler)
+        elif item.media_type == MediaType.ANIMATION:
+            await message.reply_animation(animation=file, caption=caption, has_spoiler=has_spoiler)
         else:
             await message.reply_photo(photo=file, caption=caption, has_spoiler=has_spoiler)
         return
@@ -168,13 +176,22 @@ async def _send_single_result(
     # Multiple media items — send as a media group (album)
     media_group = []
     for i, item in enumerate(downloaded[:10]):  # Telegram allows max 10 in a group
-        ext = "mp4" if item.media_type == MediaType.VIDEO else "jpg"
+        if item.media_type == MediaType.VIDEO:
+            ext = "mp4"
+        elif item.media_type == MediaType.ANIMATION:
+            ext = "gif"
+        else:
+            ext = "jpg"
         file = BufferedInputFile(item.data, filename=f"media_{i}.{ext}")
         item_caption = caption if i == 0 else None
 
         if item.media_type == MediaType.VIDEO:
             media_group.append(
                 InputMediaVideo(media=file, caption=item_caption, has_spoiler=has_spoiler)
+            )
+        elif item.media_type == MediaType.ANIMATION:
+            media_group.append(
+                InputMediaAnimation(media=file, caption=item_caption, has_spoiler=has_spoiler)
             )
         else:
             media_group.append(

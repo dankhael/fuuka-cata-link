@@ -15,6 +15,7 @@ logger = structlog.get_logger()
 class MediaType(StrEnum):
     IMAGE = "image"
     VIDEO = "video"
+    ANIMATION = "animation"  # GIFs and other animations
     TEXT = "text"
     CODE = "code"
 

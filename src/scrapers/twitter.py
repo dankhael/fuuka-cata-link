@@ -108,7 +108,9 @@ class TwitterScraper(BaseScraper):
     def _parse_media_item(item: dict) -> MediaItem:
         """Parse a single media entry from fxtwitter's media.all[]."""
         item_type = item.get("type", "")
-        if item_type in ("video", "gif"):
+        if item_type == "gif":
+            return MediaItem(url=item["url"], media_type=MediaType.ANIMATION)
+        if item_type == "video":
             return MediaItem(url=item["url"], media_type=MediaType.VIDEO)
         return MediaItem(url=item["url"], media_type=MediaType.IMAGE)
 

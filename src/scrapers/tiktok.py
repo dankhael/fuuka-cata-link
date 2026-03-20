@@ -135,7 +135,13 @@ class TikTokScraper(BaseScraper):
         if not result.data:
             raise RuntimeError("yt-dlp downloaded no data for TikTok URL")
 
-        item = MediaItem(url=url, media_type=MediaType.VIDEO)
+        if result.is_animation:
+            media_type = MediaType.ANIMATION
+        elif result.is_video:
+            media_type = MediaType.VIDEO
+        else:
+            media_type = MediaType.IMAGE
+        item = MediaItem(url=url, media_type=media_type)
         item.data = result.data
 
         return ScrapedMedia(

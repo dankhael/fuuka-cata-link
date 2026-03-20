@@ -19,6 +19,7 @@ from src.config import settings
 logger = structlog.get_logger()
 
 _VIDEO_EXTS = {"mp4", "webm", "mkv", "mov", "avi", "flv"}
+_ANIMATION_EXTS = {"gif", "gifv"}
 
 
 @dataclass
@@ -28,6 +29,7 @@ class GalleryDlFile:
     data: bytes
     ext: str
     is_video: bool = False
+    is_animation: bool = False
 
 
 @dataclass
@@ -101,11 +103,13 @@ async def gallery_dl_download(
                 continue
 
             ext = media_file.suffix.lstrip(".")
+            is_animation = ext in _ANIMATION_EXTS
             files.append(
                 GalleryDlFile(
                     data=media_file.read_bytes(),
                     ext=ext,
-                    is_video=ext in _VIDEO_EXTS,
+                    is_video=ext in _VIDEO_EXTS and not is_animation,
+                    is_animation=is_animation,
                 )
             )
 

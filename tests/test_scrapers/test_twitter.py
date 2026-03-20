@@ -307,7 +307,7 @@ async def test_twitter_quote_takes_priority_over_reply():
 
 @pytest.mark.asyncio
 async def test_twitter_gif_parsed_as_video():
-    """GIF media type in fxtwitter is treated as video."""
+    """GIF media type in fxtwitter is treated as animation."""
     api_data = _fx_tweet({
         "text": "Check this gif",
         "author": {"screen_name": "user"},
@@ -324,4 +324,4 @@ async def test_twitter_gif_parsed_as_video():
         result = await scraper._primary_extract("https://x.com/user/status/1")
 
     assert len(result.media_items) == 1
-    assert result.media_items[0].media_type == MediaType.VIDEO
+    assert result.media_items[0].media_type == MediaType.ANIMATION
