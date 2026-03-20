@@ -32,6 +32,17 @@ class YouTubeScraper(BaseScraper):
 
         data = json.loads(stdout)
 
+        # Reject videos longer than 5 minutes 18 seconds
+        duration = data.get("duration")
+        if duration and duration > 318:
+            minutes = int(duration // 60)
+            seconds = int(duration % 60)
+            return ScrapedMedia(
+                platform=self.platform,
+                original_url=url,
+                caption=f"Video too long: {minutes}:{seconds:02d} (max 5:18)",
+            )
+
         # Pick best format URL
         video_url = data.get("url", "")
         if not video_url and data.get("formats"):

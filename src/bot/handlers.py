@@ -166,12 +166,36 @@ async def _send_single_result(
         file = BufferedInputFile(item.data, filename=f"media.{ext}")
 
         if item.media_type == MediaType.VIDEO:
-            await message.reply_video(video=file, caption=caption, has_spoiler=has_spoiler)
+            if reply_params:
+                sent = await message.answer_video(
+                    video=file, caption=caption, has_spoiler=has_spoiler,
+                    reply_parameters=reply_params,
+                )
+            else:
+                sent = await message.reply_video(
+                    video=file, caption=caption, has_spoiler=has_spoiler,
+                )
         elif item.media_type == MediaType.ANIMATION:
-            await message.reply_animation(animation=file, caption=caption, has_spoiler=has_spoiler)
+            if reply_params:
+                sent = await message.answer_animation(
+                    animation=file, caption=caption, has_spoiler=has_spoiler,
+                    reply_parameters=reply_params,
+                )
+            else:
+                sent = await message.reply_animation(
+                    animation=file, caption=caption, has_spoiler=has_spoiler,
+                )
         else:
-            await message.reply_photo(photo=file, caption=caption, has_spoiler=has_spoiler)
-        return
+            if reply_params:
+                sent = await message.answer_photo(
+                    photo=file, caption=caption, has_spoiler=has_spoiler,
+                    reply_parameters=reply_params,
+                )
+            else:
+                sent = await message.reply_photo(
+                    photo=file, caption=caption, has_spoiler=has_spoiler,
+                )
+        return sent
 
     # Multiple media items — send as a media group (album)
     media_group = []
