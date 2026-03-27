@@ -27,3 +27,4 @@ htmlcov/
 *.temp
 downloads/
 cookies.txt
+benchmarks_output/
