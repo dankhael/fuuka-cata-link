@@ -13,10 +13,11 @@ from aiogram.types import (
 )
 
 from src.bot.filters import AllowedChat, ContainsSupportedLink
+from src.config import settings
 from src.scrapers.base import MediaType, ScrapedMedia
 from src.utils.formatters import format_caption, format_text_post, truncate
 from src.utils.link_detector import DetectedLink
-from src.utils.media_handler import download_media
+from src.utils.media_handler import download_media, ensure_within_limit
 
 logger = structlog.get_logger()
 
@@ -147,6 +148,9 @@ async def _send_single_result(
         newly_downloaded = []
 
     downloaded = items_already_downloaded + newly_downloaded
+    downloaded = await ensure_within_limit(
+        downloaded, settings.auto_download_limit_mb * 1024 * 1024
+    )
 
     if not downloaded:
         await message.reply("Could not download media from this link.")

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     # Performance
     max_file_size_mb: int = 50
+    auto_download_limit_mb: int = 10  # Compress media above this to ensure Telegram auto-downloads
     download_timeout_seconds: int = 30
     concurrent_downloads: int = 3
 
