@@ -32,6 +32,7 @@ class YtdlpResult:
     thumbnail_url: str | None = None
     is_video: bool = True
     is_animation: bool = False  # True for GIFs
+    duration: float | None = None  # seconds
 
 
 async def ytdlp_info(url: str, extra_args: list[str] | None = None) -> dict:
@@ -125,4 +126,5 @@ async def ytdlp_download(
             thumbnail_url=info.get("thumbnail"),
             is_video=is_video,
             is_animation=is_animation,
+            duration=info.get("duration"),
         )
