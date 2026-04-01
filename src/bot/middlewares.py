@@ -31,7 +31,7 @@ class LoggingMiddleware(BaseMiddleware):
             return await handler(event, data)
         finally:
             duration_ms = int((time.monotonic() - start) * 1000)
-            logger.debug("message_handled", duration_ms=duration_ms)
+            logger.info("message_handled", duration_ms=duration_ms)
 
 
 class RateLimitMiddleware(BaseMiddleware):

@@ -4,6 +4,7 @@ import asyncio
 import json
 import shutil
 import tempfile
+import time
 from io import BytesIO
 from pathlib import Path
 
@@ -53,13 +54,16 @@ async def download_media(
             except Exception as exc:
                 logger.error("media_download_failed", url=item.url, error=str(exc))
 
+    start = time.monotonic()
     try:
         await asyncio.gather(*[_fetch(item) for item in items])
     finally:
         if own_session:
             await session.close()
 
-    return [item for item in items if item.data is not None]
+    result = [item for item in items if item.data is not None]
+    logger.info("media_downloaded", count=len(result), duration_ms=int((time.monotonic() - start) * 1000))
+    return result
 
 
 def optimize_image(data: bytes, max_dimension: int = 1920, quality: int = 85) -> bytes:
@@ -131,6 +135,7 @@ async def compress_video(data: bytes, target_bytes: int, scale: str = "-2:720") 
             logger.warning("compress_video_bitrate_too_low", target_bps=target_video_bps)
             return None
 
+        ffmpeg_start = time.monotonic()
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg",
             "-y",
@@ -159,6 +164,7 @@ async def compress_video(data: bytes, target_bytes: int, scale: str = "-2:720") 
             original_mb=round(len(data) / 1024 / 1024, 1),
             compressed_mb=round(len(result) / 1024 / 1024, 1),
             scale=scale,
+            duration_ms=int((time.monotonic() - ffmpeg_start) * 1000),
         )
         return result
     except Exception as exc:

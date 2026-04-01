@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import structlog
 from aiogram import Router
 from aiogram.filters import Command
@@ -158,6 +160,8 @@ async def _send_single_result(
 
     caption = truncate(format_caption(result))
 
+    send_start = time.monotonic()
+
     # Single media item
     if len(downloaded) == 1:
         item = downloaded[0]
@@ -199,6 +203,12 @@ async def _send_single_result(
                 sent = await message.reply_photo(
                     photo=file, caption=caption, has_spoiler=has_spoiler,
                 )
+        logger.info(
+            "media_sent",
+            platform=result.platform,
+            media_count=1,
+            duration_ms=int((time.monotonic() - send_start) * 1000),
+        )
         return sent
 
     # Multiple media items — send as a media group (album)
@@ -232,4 +242,10 @@ async def _send_single_result(
         )
     else:
         sent = await message.reply_media_group(media=media_group)
+    logger.info(
+        "media_sent",
+        platform=result.platform,
+        media_count=len(media_group),
+        duration_ms=int((time.monotonic() - send_start) * 1000),
+    )
     return sent[0] if sent else None
