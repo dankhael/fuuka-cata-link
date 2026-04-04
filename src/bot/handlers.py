@@ -75,6 +75,34 @@ async def _process_links(
         await _send_result(message, result, has_spoiler=link.is_spoiler)
 
 
+HELP_TEXT = """<b>Fuuka</b> — expansora de links de redes sociais
+
+Eu extraio e reencaminho automaticamente mídias de links compartilhados neste chat.
+
+<b>Plataformas suportadas:</b>
+• Twitter / X
+• YouTube
+• Instagram (somente reels no momento)
+• TikTok
+• Facebook (somente reels no momento)
+• GitHub (repositórios, PRs, issues)
+• Reddit
+
+<b>Comandos:</b>
+/help — exibir esta mensagem
+/ignore — postar um link sem eu expandir
+/noreply — expandir o link mas ocultar o post citado/respondido
+
+<b>Como funciona:</b>
+Basta compartilhar um link suportado e eu respondo com a mídia ou conteúdo do post. Para spoilers, coloque o link em uma tag de spoiler antes."""
+
+
+@router.message(Command("help"))
+async def handle_help(message: Message) -> None:
+    """Send a help message explaining Fuuka's features and commands."""
+    await message.reply(HELP_TEXT, parse_mode="HTML")
+
+
 @router.message(Command("ignore"), AllowedChat(), ContainsSupportedLink())
 async def handle_ignore(message: Message, detected_links: list[DetectedLink]) -> None:
     """Silently ignore a supported link — do not scrape or reply."""
