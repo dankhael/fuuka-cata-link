@@ -38,7 +38,7 @@ class YtdlpResult:
 
 async def ytdlp_info(url: str, extra_args: list[str] | None = None) -> dict:
     """Run yt-dlp --dump-json to get metadata without downloading."""
-    cmd = ["yt-dlp", "--dump-json", "--no-download"]
+    cmd = ["yt-dlp", "--dump-json", "--no-download", "--remote-components", "ejs:github"]
     if settings.ytdlp_js_runtime:
         cmd.extend(["--js-runtimes", settings.ytdlp_js_runtime])
     if extra_args:
@@ -77,6 +77,7 @@ async def ytdlp_download(
             "--max-filesize", f"{settings.max_file_size_mb}M",
             "--write-info-json",
             "--socket-timeout", str(settings.download_timeout_seconds),
+            "--remote-components", "ejs:github",
         ]
         if cookies_file:
             # Copy cookies to a writable location so yt-dlp can save updated cookies
