@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,7 +79,10 @@ async def ytdlp_download(
             "--socket-timeout", str(settings.download_timeout_seconds),
         ]
         if cookies_file:
-            cmd.extend(["--cookies", cookies_file])
+            # Copy cookies to a writable location so yt-dlp can save updated cookies
+            writable_cookies = str(Path(tmpdir) / "cookies.txt")
+            shutil.copy2(cookies_file, writable_cookies)
+            cmd.extend(["--cookies", writable_cookies])
         elif settings.cookies_from_browser:
             cmd.extend(["--cookies-from-browser", settings.cookies_from_browser])
         if settings.ytdlp_js_runtime:
