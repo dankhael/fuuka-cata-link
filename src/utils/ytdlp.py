@@ -38,6 +38,8 @@ class YtdlpResult:
 async def ytdlp_info(url: str, extra_args: list[str] | None = None) -> dict:
     """Run yt-dlp --dump-json to get metadata without downloading."""
     cmd = ["yt-dlp", "--dump-json", "--no-download"]
+    if settings.ytdlp_js_runtime:
+        cmd.extend(["--js-runtimes", settings.ytdlp_js_runtime])
     if extra_args:
         cmd.extend(extra_args)
     cmd.append(url)
@@ -77,6 +79,10 @@ async def ytdlp_download(
         ]
         if cookies_file:
             cmd.extend(["--cookies", cookies_file])
+        elif settings.cookies_from_browser:
+            cmd.extend(["--cookies-from-browser", settings.cookies_from_browser])
+        if settings.ytdlp_js_runtime:
+            cmd.extend(["--js-runtimes", settings.ytdlp_js_runtime])
         if extra_args:
             cmd.extend(extra_args)
         cmd.append(url)

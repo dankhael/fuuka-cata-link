@@ -22,8 +22,12 @@ class Settings(BaseSettings):
     reddit_client_id: str | None = None
     reddit_client_secret: str | None = None
 
-    # Cookies file for authenticated scraping (Facebook, Instagram)
+    # Cookies file for authenticated scraping (Facebook, Instagram, YouTube)
     cookies_file: str | None = None
+    cookies_from_browser: str | None = None  # e.g. "chrome", "firefox", "edge"
+
+    # yt-dlp JS runtime for YouTube (required since yt-dlp 2025+)
+    ytdlp_js_runtime: str | None = None  # e.g. "deno", "nodejs", "deno:/path/to/deno"
 
     # Performance
     max_file_size_mb: int = 50
