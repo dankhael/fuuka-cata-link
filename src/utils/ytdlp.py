@@ -73,15 +73,18 @@ async def ytdlp_download(
             "yt-dlp",
             "-o", output_template,
             "--no-playlist",
-            "-f", f"best[filesize<{settings.max_file_size_mb}M]/best",
+            "-f", f"bv*+ba[filesize<{settings.max_file_size_mb}M]/bv*+ba/b[filesize<{settings.max_file_size_mb}M]/b",
             "--max-filesize", f"{settings.max_file_size_mb}M",
             "--write-info-json",
             "--socket-timeout", str(settings.download_timeout_seconds),
             "--remote-components", "ejs:github",
         ]
         if cookies_file:
-            # Copy cookies to a writable location so yt-dlp can save updated cookies
-            writable_cookies = str(Path(tmpdir) / "cookies.txt")
+            # Copy cookies to a separate subdirectory so yt-dlp can save updated
+            # cookies without polluting the media output directory
+            cookies_dir = Path(tmpdir) / "_cookies"
+            cookies_dir.mkdir()
+            writable_cookies = str(cookies_dir / "cookies.txt")
             shutil.copy2(cookies_file, writable_cookies)
             cmd.extend(["--cookies", writable_cookies])
         elif settings.cookies_from_browser:
