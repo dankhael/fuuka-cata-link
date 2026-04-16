@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_file: str = "logs/bot.log"
 
+    # Diagnostics
+    error_log_file: str = "logs/errors.log"
+    performance_log_file: str = "logs/performance.log"
+    diagnostics_max_size_mb: int = 5
+
     # Debug mode — enables verbose per-step logging in scrapers
     debug_mode: bool = False
 

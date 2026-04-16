@@ -13,6 +13,7 @@ from aiogram.enums import ParseMode
 from src.bot.handlers import router, setup_scrapers
 from src.bot.middlewares import LoggingMiddleware, RateLimitMiddleware
 from src.config import settings
+from src.utils.diagnostics import error_diagnostics_processor, performance_processor
 
 
 def configure_logging() -> None:
@@ -25,6 +26,8 @@ def configure_logging() -> None:
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
+            error_diagnostics_processor,
+            performance_processor,
             structlog.dev.ConsoleRenderer()
             if sys.stderr.isatty()
             else structlog.processors.JSONRenderer(),
