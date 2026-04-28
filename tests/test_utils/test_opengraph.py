@@ -1,8 +1,8 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.utils.opengraph import fetch_opengraph, OpenGraphData, download_og_image
+import pytest
 
+from src.utils.opengraph import OpenGraphData, download_og_image, fetch_opengraph
 
 SAMPLE_HTML = """
 <!DOCTYPE html>

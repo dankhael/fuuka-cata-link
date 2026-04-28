@@ -40,9 +40,7 @@ class TwitterScraper(BaseScraper):
                 parent_screen_name = tweet_data.get("replying_to", "_")
                 parent_id = tweet_data["replying_to_status"]
                 if parent_id:
-                    parent_api_url = (
-                        f"{_FX_API_BASE}/{parent_screen_name}/status/{parent_id}"
-                    )
+                    parent_api_url = f"{_FX_API_BASE}/{parent_screen_name}/status/{parent_id}"
                     try:
                         parent_data = await self._fetch_tweet(session, parent_api_url)
                         parent_url = parent_data.get(
@@ -63,9 +61,7 @@ class TwitterScraper(BaseScraper):
     @staticmethod
     def _to_api_url(url: str) -> str:
         """Convert a twitter.com / x.com URL to api.fxtwitter.com."""
-        return url.replace("twitter.com", "api.fxtwitter.com").replace(
-            "x.com", "api.fxtwitter.com"
-        )
+        return url.replace("twitter.com", "api.fxtwitter.com").replace("x.com", "api.fxtwitter.com")
 
     @staticmethod
     async def _fetch_tweet(session: aiohttp.ClientSession, api_url: str) -> dict:

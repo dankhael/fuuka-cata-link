@@ -56,9 +56,7 @@ class RateLimitMiddleware(BaseMiddleware):
         now = time.monotonic()
 
         # Prune old entries
-        self._requests[user_id] = [
-            t for t in self._requests[user_id] if now - t < self._window
-        ]
+        self._requests[user_id] = [t for t in self._requests[user_id] if now - t < self._window]
 
         if len(self._requests[user_id]) >= self._max:
             logger.warning("rate_limited", user_id=user_id, chat_id=event.chat.id)

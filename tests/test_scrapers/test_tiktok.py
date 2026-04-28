@@ -58,15 +58,17 @@ def _make_session_with_responses(responses: list):
 @pytest.mark.asyncio
 async def test_tiktok_photo_carousel():
     """Photo post with multiple images returns IMAGE media items."""
-    api_data = _tikwm_response({
-        "title": "Cool photo set",
-        "author": {"unique_id": "photographer"},
-        "images": [
-            "https://cdn.tiktok.com/img1.jpg",
-            "https://cdn.tiktok.com/img2.jpg",
-            "https://cdn.tiktok.com/img3.jpg",
-        ],
-    })
+    api_data = _tikwm_response(
+        {
+            "title": "Cool photo set",
+            "author": {"unique_id": "photographer"},
+            "images": [
+                "https://cdn.tiktok.com/img1.jpg",
+                "https://cdn.tiktok.com/img2.jpg",
+                "https://cdn.tiktok.com/img3.jpg",
+            ],
+        }
+    )
 
     responses = [
         _make_json_response(api_data),
@@ -92,11 +94,13 @@ async def test_tiktok_photo_carousel():
 @pytest.mark.asyncio
 async def test_tiktok_single_photo():
     """Photo post with a single image works correctly."""
-    api_data = _tikwm_response({
-        "title": "One pic",
-        "author": {"unique_id": "user1"},
-        "images": ["https://cdn.tiktok.com/single.jpg"],
-    })
+    api_data = _tikwm_response(
+        {
+            "title": "One pic",
+            "author": {"unique_id": "user1"},
+            "images": ["https://cdn.tiktok.com/single.jpg"],
+        }
+    )
 
     responses = [
         _make_json_response(api_data),
@@ -121,12 +125,14 @@ async def test_tiktok_single_photo():
 @pytest.mark.asyncio
 async def test_tiktok_video_via_tikwm():
     """Video post downloads from hdplay URL."""
-    api_data = _tikwm_response({
-        "title": "Funny video",
-        "author": {"unique_id": "videomaker"},
-        "hdplay": "https://cdn.tiktok.com/hd_video.mp4",
-        "play": "https://cdn.tiktok.com/sd_video.mp4",
-    })
+    api_data = _tikwm_response(
+        {
+            "title": "Funny video",
+            "author": {"unique_id": "videomaker"},
+            "hdplay": "https://cdn.tiktok.com/hd_video.mp4",
+            "play": "https://cdn.tiktok.com/sd_video.mp4",
+        }
+    )
 
     responses = [
         _make_json_response(api_data),
@@ -150,12 +156,14 @@ async def test_tiktok_video_via_tikwm():
 @pytest.mark.asyncio
 async def test_tiktok_video_sd_fallback():
     """When hdplay is empty, falls back to play URL."""
-    api_data = _tikwm_response({
-        "title": "SD video",
-        "author": {"unique_id": "user"},
-        "hdplay": "",
-        "play": "https://cdn.tiktok.com/sd_video.mp4",
-    })
+    api_data = _tikwm_response(
+        {
+            "title": "SD video",
+            "author": {"unique_id": "user"},
+            "hdplay": "",
+            "play": "https://cdn.tiktok.com/sd_video.mp4",
+        }
+    )
 
     responses = [
         _make_json_response(api_data),
@@ -194,15 +202,17 @@ async def test_tiktok_tikwm_api_error():
 @pytest.mark.asyncio
 async def test_tiktok_photo_partial_download_failure():
     """If some images fail to download, remaining images are still returned."""
-    api_data = _tikwm_response({
-        "title": "Partial",
-        "author": {"unique_id": "user"},
-        "images": [
-            "https://cdn.tiktok.com/ok.jpg",
-            "https://cdn.tiktok.com/broken.jpg",
-            "https://cdn.tiktok.com/also_ok.jpg",
-        ],
-    })
+    api_data = _tikwm_response(
+        {
+            "title": "Partial",
+            "author": {"unique_id": "user"},
+            "images": [
+                "https://cdn.tiktok.com/ok.jpg",
+                "https://cdn.tiktok.com/broken.jpg",
+                "https://cdn.tiktok.com/also_ok.jpg",
+            ],
+        }
+    )
 
     # Second image download fails
     error_resp = AsyncMock()

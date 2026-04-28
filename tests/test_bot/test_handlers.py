@@ -29,9 +29,7 @@ def _result(
             platform=Platform.TWITTER,
             original_url="https://x.com/u/status/0",
             caption=ref_caption,
-            media_items=[
-                MediaItem(url="https://example.com/p.jpg", media_type=MediaType.IMAGE)
-            ],
+            media_items=[MediaItem(url="https://example.com/p.jpg", media_type=MediaType.IMAGE)],
         )
     return ScrapedMedia(
         platform=Platform.TWITTER,
@@ -49,8 +47,10 @@ async def test_strip_caption_drops_caption_and_keeps_media():
     message = AsyncMock()
     send = AsyncMock()
 
-    with patch.dict(handlers._SCRAPER_MAP, {Platform.TWITTER: scraper}, clear=True), \
-         patch.object(handlers, "_send_result", send):
+    with (
+        patch.dict(handlers._SCRAPER_MAP, {Platform.TWITTER: scraper}, clear=True),
+        patch.object(handlers, "_send_result", send),
+    ):
         await handlers._process_links(message, [_link()], strip_caption=True)
 
     assert send.await_count == 1
@@ -65,8 +65,10 @@ async def test_strip_caption_skips_text_only_post():
     message = AsyncMock()
     send = AsyncMock()
 
-    with patch.dict(handlers._SCRAPER_MAP, {Platform.TWITTER: scraper}, clear=True), \
-         patch.object(handlers, "_send_result", send):
+    with (
+        patch.dict(handlers._SCRAPER_MAP, {Platform.TWITTER: scraper}, clear=True),
+        patch.object(handlers, "_send_result", send),
+    ):
         await handlers._process_links(message, [_link()], strip_caption=True)
 
     send.assert_not_awaited()
@@ -80,8 +82,10 @@ async def test_strip_caption_also_strips_referenced_post_caption():
     message = AsyncMock()
     send = AsyncMock()
 
-    with patch.dict(handlers._SCRAPER_MAP, {Platform.TWITTER: scraper}, clear=True), \
-         patch.object(handlers, "_send_result", send):
+    with (
+        patch.dict(handlers._SCRAPER_MAP, {Platform.TWITTER: scraper}, clear=True),
+        patch.object(handlers, "_send_result", send),
+    ):
         await handlers._process_links(message, [_link()], strip_caption=True)
 
     sent = send.call_args.args[1]
@@ -96,8 +100,10 @@ async def test_default_mode_keeps_caption():
     message = AsyncMock()
     send = AsyncMock()
 
-    with patch.dict(handlers._SCRAPER_MAP, {Platform.TWITTER: scraper}, clear=True), \
-         patch.object(handlers, "_send_result", send):
+    with (
+        patch.dict(handlers._SCRAPER_MAP, {Platform.TWITTER: scraper}, clear=True),
+        patch.object(handlers, "_send_result", send),
+    ):
         await handlers._process_links(message, [_link()])
 
     sent = send.call_args.args[1]

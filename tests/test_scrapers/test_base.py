@@ -86,6 +86,7 @@ async def test_has_media_property():
 @pytest.mark.asyncio
 async def test_pre_populated_data_preserved():
     """Test that items with pre-populated data pass through the fallback chain."""
+
     class PrePopulatedScraper(BaseScraper):
         @property
         def platform(self) -> Platform:

@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.scrapers.github import GitHubScraper
 from src.utils.link_detector import Platform
@@ -32,9 +33,7 @@ async def test_github_commit_extraction():
 
     with patch("aiohttp.ClientSession", return_value=mock_session):
         scraper = GitHubScraper()
-        result = await scraper._primary_extract(
-            "https://github.com/owner/repo/commit/abc123def"
-        )
+        result = await scraper._primary_extract("https://github.com/owner/repo/commit/abc123def")
 
     assert result.platform == Platform.GITHUB
     assert result.author == "Dev"
@@ -69,9 +68,7 @@ async def test_github_pr_extraction():
 
     with patch("aiohttp.ClientSession", return_value=mock_session):
         scraper = GitHubScraper()
-        result = await scraper._primary_extract(
-            "https://github.com/owner/repo/pull/42"
-        )
+        result = await scraper._primary_extract("https://github.com/owner/repo/pull/42")
 
     assert result.platform == Platform.GITHUB
     assert result.author == "contributor"

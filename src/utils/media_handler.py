@@ -62,7 +62,8 @@ async def download_media(
             await session.close()
 
     result = [item for item in items if item.data is not None]
-    logger.info("media_downloaded", count=len(result), duration_ms=int((time.monotonic() - start) * 1000))
+    duration_ms = int((time.monotonic() - start) * 1000)
+    logger.info("media_downloaded", count=len(result), duration_ms=duration_ms)
     return result
 
 
@@ -99,8 +100,10 @@ async def _get_video_duration(path: Path) -> float:
     """Get video duration in seconds using ffprobe."""
     proc = await asyncio.create_subprocess_exec(
         "ffprobe",
-        "-v", "quiet",
-        "-print_format", "json",
+        "-v",
+        "quiet",
+        "-print_format",
+        "json",
         "-show_format",
         str(path),
         stdout=asyncio.subprocess.PIPE,
@@ -139,15 +142,24 @@ async def compress_video(data: bytes, target_bytes: int, scale: str = "-2:720") 
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg",
             "-y",
-            "-i", str(input_path),
-            "-c:v", "libx264",
-            "-b:v", str(target_video_bps),
-            "-maxrate", str(target_video_bps),
-            "-bufsize", str(target_video_bps * 2),
-            "-vf", f"scale={scale}",
-            "-c:a", "aac",
-            "-b:a", "128k",
-            "-movflags", "+faststart",
+            "-i",
+            str(input_path),
+            "-c:v",
+            "libx264",
+            "-b:v",
+            str(target_video_bps),
+            "-maxrate",
+            str(target_video_bps),
+            "-bufsize",
+            str(target_video_bps * 2),
+            "-vf",
+            f"scale={scale}",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
             str(output_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

@@ -26,8 +26,7 @@ _BROWSER_USER_AGENT = (
 _BROWSER_HEADERS: dict[str, str] = {
     "User-Agent": _BROWSER_USER_AGENT,
     "Accept": (
-        "text/html,application/xhtml+xml,application/xml;q=0.9,"
-        "image/avif,image/webp,*/*;q=0.8"
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
     ),
     "Accept-Language": "en-US,en;q=0.9",
     "Accept-Encoding": "gzip, deflate, br",
@@ -58,9 +57,7 @@ def _clean_facebook_url(url: str) -> str:
     parsed = urlparse(url)
     if not parsed.query:
         return url
-    clean_query = {
-        k: v for k, v in parse_qs(parsed.query).items() if k not in _FB_TRACKING_PARAMS
-    }
+    clean_query = {k: v for k, v in parse_qs(parsed.query).items() if k not in _FB_TRACKING_PARAMS}
     cleaned = parsed._replace(query=urlencode(clean_query, doseq=True) if clean_query else "")
     return urlunparse(cleaned)
 
@@ -302,9 +299,7 @@ class FacebookScraper(BaseScraper):
 
                 # Check if we got redirected to login
                 if "/login" in final_url:
-                    raise RuntimeError(
-                        f"Redirected to login page: {final_url}"
-                    )
+                    raise RuntimeError(f"Redirected to login page: {final_url}")
 
                 resp.raise_for_status()
                 html = await resp.text(encoding="utf-8", errors="ignore")
@@ -331,12 +326,14 @@ class FacebookScraper(BaseScraper):
         # Extract og:image
         og_match = re.search(
             r'<meta\s+[^>]*?property=["\']og:image["\'][^>]*?content=["\']([^"\']+)["\']',
-            html, re.IGNORECASE,
+            html,
+            re.IGNORECASE,
         )
         if not og_match:
             og_match = re.search(
                 r'<meta\s+[^>]*?content=["\']([^"\']+)["\'][^>]*?property=["\']og:image["\']',
-                html, re.IGNORECASE,
+                html,
+                re.IGNORECASE,
             )
         if not og_match:
             _dbg(
@@ -372,11 +369,13 @@ class FacebookScraper(BaseScraper):
         # Extract caption from og:title / og:description
         title_match = re.search(
             r'<meta\s+[^>]*?property=["\']og:title["\'][^>]*?content=["\']([^"\']*)["\']',
-            html, re.IGNORECASE,
+            html,
+            re.IGNORECASE,
         )
         desc_match = re.search(
             r'<meta\s+[^>]*?property=["\']og:description["\'][^>]*?content=["\']([^"\']*)["\']',
-            html, re.IGNORECASE,
+            html,
+            re.IGNORECASE,
         )
 
         caption = None
@@ -434,21 +433,24 @@ class FacebookScraper(BaseScraper):
         # Pattern 1: scaledImageFitWidth img tags
         for match in re.finditer(
             r'<img[^>]+class="[^"]*scaledImageFitWidth[^"]*"[^>]+src="([^"]+)"',
-            html, re.IGNORECASE,
+            html,
+            re.IGNORECASE,
         ):
             image_urls.append(match.group(1).replace("&amp;", "&"))
 
         # Pattern 2: data-src on img tags (lazy-loaded)
         for match in re.finditer(
             r'<img[^>]+data-src="([^"]+(?:scontent|fbcdn)[^"]+)"',
-            html, re.IGNORECASE,
+            html,
+            re.IGNORECASE,
         ):
             image_urls.append(match.group(1).replace("&amp;", "&"))
 
         # Pattern 3: og:image meta tags
         for match in re.finditer(
             r'<meta\s+[^>]*?property=["\']og:image["\'][^>]*?content=["\']([^"\']+)["\']',
-            html, re.IGNORECASE,
+            html,
+            re.IGNORECASE,
         ):
             image_urls.append(match.group(1).replace("&amp;", "&"))
 
@@ -457,7 +459,8 @@ class FacebookScraper(BaseScraper):
             r"background-image:\s*url\(['\"]?(https?://[^)'\"]+"
             r"(?:scontent|fbcdn)[^)'\"]+"
             r")['\"]?\)",
-            html, re.IGNORECASE,
+            html,
+            re.IGNORECASE,
         ):
             image_urls.append(match.group(1).replace("&amp;", "&"))
 
@@ -510,7 +513,8 @@ class FacebookScraper(BaseScraper):
         caption = None
         text_match = re.search(
             r'<div[^>]+class="[^"]*_5pbx[^"]*"[^>]*>(.*?)</div>',
-            html, re.DOTALL | re.IGNORECASE,
+            html,
+            re.DOTALL | re.IGNORECASE,
         )
         if text_match:
             # Strip HTML tags from the text
@@ -523,7 +527,8 @@ class FacebookScraper(BaseScraper):
             desc_match = re.search(
                 r'<meta\s+[^>]*?property=["\']og:description["\'][^>]*?'
                 r'content=["\']([^"\']*)["\']',
-                html, re.IGNORECASE,
+                html,
+                re.IGNORECASE,
             )
             if desc_match and desc_match.group(1):
                 caption = desc_match.group(1).replace("&amp;", "&")
@@ -583,7 +588,9 @@ class FacebookScraper(BaseScraper):
                         if location and "/share/" not in location and "/login" not in location:
                             location = _clean_facebook_url(location)
                             logger.info(
-                                "facebook_share_resolved", original=url, resolved=location,
+                                "facebook_share_resolved",
+                                original=url,
+                                resolved=location,
                             )
                             return location
                         _dbg(
@@ -627,7 +634,9 @@ class FacebookScraper(BaseScraper):
                     if resolved != url and "/share/" not in resolved:
                         resolved = _clean_facebook_url(resolved)
                         logger.info(
-                            "facebook_share_resolved", original=url, resolved=resolved,
+                            "facebook_share_resolved",
+                            original=url,
+                            resolved=resolved,
                         )
                         return resolved
                     _dbg("fb_share_strategy2_no_change", resolved=resolved)
@@ -680,7 +689,8 @@ class FacebookScraper(BaseScraper):
             r'(?:src|data-src|srcset)=["\']'
             r"(.*?(?:scontent|external|fbcdn).*?(?:jpg|jpeg|png|webp))"
             r'["\']',
-            html, re.IGNORECASE,
+            html,
+            re.IGNORECASE,
         )
 
         # Also check for og:image in case mbasic serves it

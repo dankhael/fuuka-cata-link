@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import StrEnum
-from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 
 class Platform(StrEnum):
@@ -86,12 +86,11 @@ def _clean_url(url: str, platform: Platform) -> str:
     if platform == Platform.REDDIT:
         # Reddit share links add utm_source, utm_medium etc. — strip them all
         clean_query = {
-            k: v for k, v in parse_qs(parsed.query).items()
+            k: v
+            for k, v in parse_qs(parsed.query).items()
             if not k.startswith("utm_") and k not in ("share", "context")
         }
-        cleaned = parsed._replace(
-            query=urlencode(clean_query, doseq=True) if clean_query else ""
-        )
+        cleaned = parsed._replace(query=urlencode(clean_query, doseq=True) if clean_query else "")
         return urlunparse(cleaned)
 
     if platform == Platform.TIKTOK:

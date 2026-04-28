@@ -26,12 +26,17 @@ async def test_gallery_dl_download_success(tmp_path):
         img = tmp_path / "test_image.jpg"
         img.write_bytes(image_data)
         meta = tmp_path / "test_image.json"
-        meta.write_text(json.dumps({
-            "description": "Test post",
-            "username": "testuser",
-        }))
+        meta.write_text(
+            json.dumps(
+                {
+                    "description": "Test post",
+                    "username": "testuser",
+                }
+            )
+        )
         # Copy files to the actual dest used by gallery-dl
         from pathlib import Path
+
         dest_path = Path(dest)
         dest_path.mkdir(parents=True, exist_ok=True)
         (dest_path / "test_image.jpg").write_bytes(image_data)
@@ -83,6 +88,7 @@ async def test_gallery_dl_skips_tiny_files():
 
     async def fake_subprocess(*cmd, **kwargs):
         from pathlib import Path
+
         dest_path = Path(cmd[2])
         dest_path.mkdir(parents=True, exist_ok=True)
         (dest_path / "tiny.jpg").write_bytes(b"x" * 500)  # < 1KB
@@ -100,6 +106,7 @@ async def test_gallery_dl_video_detection():
 
     async def fake_subprocess(*cmd, **kwargs):
         from pathlib import Path
+
         dest_path = Path(cmd[2])
         dest_path.mkdir(parents=True, exist_ok=True)
         (dest_path / "clip.mp4").write_bytes(b"x" * 5000)
@@ -122,6 +129,7 @@ async def test_gallery_dl_passes_cookies():
     async def fake_subprocess(*cmd, **kwargs):
         captured_cmd.extend(cmd)
         from pathlib import Path
+
         dest_path = Path(cmd[2])
         dest_path.mkdir(parents=True, exist_ok=True)
         (dest_path / "img.jpg").write_bytes(b"x" * 2000)
@@ -145,6 +153,7 @@ async def test_gallery_dl_multiple_files():
 
     async def fake_subprocess(*cmd, **kwargs):
         from pathlib import Path
+
         dest_path = Path(cmd[2])
         dest_path.mkdir(parents=True, exist_ok=True)
         (dest_path / "img1.jpg").write_bytes(b"a" * 2000)

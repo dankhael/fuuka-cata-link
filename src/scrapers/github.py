@@ -15,12 +15,8 @@ class GitHubScraper(BaseScraper):
 
     async def _primary_extract(self, url: str) -> ScrapedMedia:
         """Fetch commit or pull request info via the GitHub API."""
-        commit_match = re.search(
-            r"github\.com/([\w\-]+)/([\w\-]+)/commit/([0-9a-f]+)", url
-        )
-        pr_match = re.search(
-            r"github\.com/([\w\-]+)/([\w\-]+)/pull/(\d+)", url
-        )
+        commit_match = re.search(r"github\.com/([\w\-]+)/([\w\-]+)/commit/([0-9a-f]+)", url)
+        pr_match = re.search(r"github\.com/([\w\-]+)/([\w\-]+)/pull/(\d+)", url)
 
         if commit_match:
             return await self._extract_commit(url, *commit_match.groups())
@@ -29,9 +25,7 @@ class GitHubScraper(BaseScraper):
         else:
             raise ValueError(f"Could not parse GitHub URL: {url}")
 
-    async def _extract_commit(
-        self, url: str, owner: str, repo: str, sha: str
-    ) -> ScrapedMedia:
+    async def _extract_commit(self, url: str, owner: str, repo: str, sha: str) -> ScrapedMedia:
         api_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}"
 
         async with aiohttp.ClientSession() as session:
@@ -55,8 +49,7 @@ class GitHubScraper(BaseScraper):
             f"Author: {author}",
             f"Message: {message}",
             "",
-            f"+{stats.get('additions', 0)} -{stats.get('deletions', 0)} "
-            f"in {len(files)} file(s)",
+            f"+{stats.get('additions', 0)} -{stats.get('deletions', 0)} in {len(files)} file(s)",
         ]
         for f in files[:10]:
             lines.append(f"  {f.get('status', '?')} {f.get('filename', '')}")

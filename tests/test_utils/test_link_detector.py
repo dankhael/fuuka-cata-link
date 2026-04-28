@@ -1,5 +1,3 @@
-import pytest
-
 from src.utils.link_detector import Platform, detect_links
 
 
@@ -61,9 +59,7 @@ class TestDetectLinks:
         assert links[0].platform == Platform.FACEBOOK
 
     def test_github_commit(self):
-        links = detect_links(
-            "https://github.com/owner/repo/commit/abc123def456"
-        )
+        links = detect_links("https://github.com/owner/repo/commit/abc123def456")
         assert len(links) == 1
         assert links[0].platform == Platform.GITHUB
 
@@ -74,9 +70,7 @@ class TestDetectLinks:
         assert links[0].url == "https://github.com/owner/repo/pull/42"
 
     def test_reddit_post(self):
-        links = detect_links(
-            "https://www.reddit.com/r/python/comments/abc123/some_title/"
-        )
+        links = detect_links("https://www.reddit.com/r/python/comments/abc123/some_title/")
         assert len(links) == 1
         assert links[0].platform == Platform.REDDIT
 

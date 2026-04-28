@@ -39,9 +39,7 @@ async def test_instagram_extraction_speed(size_category: str, url: str, bench):
         result = await scraper.extract(url)
         extract_time = time.perf_counter() - start
 
-        dl_time, total_bytes, saved = await download_and_save(
-            result, "instagram", size_category
-        )
+        dl_time, total_bytes, saved = await download_and_save(result, "instagram", size_category)
 
         bench.record(
             platform="instagram",

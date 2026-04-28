@@ -108,7 +108,8 @@ Eu extraio e reencaminho automaticamente mídias de links compartilhados neste c
 /nocaption — enviar apenas a mídia (imagem/vídeo) sem a legenda
 
 <b>Como funciona:</b>
-Basta compartilhar um link suportado e eu respondo com a mídia ou conteúdo do post. Para spoilers, coloque o link em uma tag de spoiler antes."""
+Basta compartilhar um link suportado e eu respondo com a mídia ou conteúdo do post. \
+Para spoilers, coloque o link em uma tag de spoiler antes."""
 
 
 @router.message(Command("help"))
@@ -162,7 +163,8 @@ async def _send_result(
             reply_to_message_id = ref_msg.message_id
 
     await _send_single_result(
-        message, result,
+        message,
+        result,
         reply_to_message_id=reply_to_message_id,
         has_spoiler=has_spoiler,
     )
@@ -181,9 +183,7 @@ async def _send_single_result(
     uses ``message.answer_*`` with an explicit ``ReplyParameters`` so the bot
     message replies to a different message in the chat.
     """
-    reply_params = (
-        ReplyParameters(message_id=reply_to_message_id) if reply_to_message_id else None
-    )
+    reply_params = ReplyParameters(message_id=reply_to_message_id) if reply_to_message_id else None
 
     if not result.has_media:
         text = format_text_post(result)
@@ -227,32 +227,44 @@ async def _send_single_result(
         if item.media_type == MediaType.VIDEO:
             if reply_params:
                 sent = await message.answer_video(
-                    video=file, caption=caption, has_spoiler=has_spoiler,
+                    video=file,
+                    caption=caption,
+                    has_spoiler=has_spoiler,
                     reply_parameters=reply_params,
                 )
             else:
                 sent = await message.reply_video(
-                    video=file, caption=caption, has_spoiler=has_spoiler,
+                    video=file,
+                    caption=caption,
+                    has_spoiler=has_spoiler,
                 )
         elif item.media_type == MediaType.ANIMATION:
             if reply_params:
                 sent = await message.answer_animation(
-                    animation=file, caption=caption, has_spoiler=has_spoiler,
+                    animation=file,
+                    caption=caption,
+                    has_spoiler=has_spoiler,
                     reply_parameters=reply_params,
                 )
             else:
                 sent = await message.reply_animation(
-                    animation=file, caption=caption, has_spoiler=has_spoiler,
+                    animation=file,
+                    caption=caption,
+                    has_spoiler=has_spoiler,
                 )
         else:
             if reply_params:
                 sent = await message.answer_photo(
-                    photo=file, caption=caption, has_spoiler=has_spoiler,
+                    photo=file,
+                    caption=caption,
+                    has_spoiler=has_spoiler,
                     reply_parameters=reply_params,
                 )
             else:
                 sent = await message.reply_photo(
-                    photo=file, caption=caption, has_spoiler=has_spoiler,
+                    photo=file,
+                    caption=caption,
+                    has_spoiler=has_spoiler,
                 )
         logger.info(
             "media_sent",
@@ -288,9 +300,7 @@ async def _send_single_result(
             )
 
     if reply_params:
-        sent = await message.answer_media_group(
-            media=media_group, reply_parameters=reply_params
-        )
+        sent = await message.answer_media_group(media=media_group, reply_parameters=reply_params)
     else:
         sent = await message.reply_media_group(media=media_group)
     logger.info(
