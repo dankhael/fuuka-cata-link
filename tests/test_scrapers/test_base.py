@@ -63,9 +63,8 @@ async def test_fallback_to_ytdlp():
 @pytest.mark.asyncio
 async def test_all_methods_fail():
     scraper = AllFailScraper()
-    result = await scraper.extract("https://example.com")
-    assert result.method_used == "none"
-    assert "Could not extract" in result.caption
+    with pytest.raises(RuntimeError, match="all extraction methods failed"):
+        await scraper.extract("https://example.com")
 
 
 @pytest.mark.asyncio
