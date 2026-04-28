@@ -70,7 +70,7 @@ async def _process_links(
                 url=link.url,
                 error=str(exc),
             )
-            await message.reply(f"Failed to extract media from {link.platform} link.")
+            await message.reply(f"Não consegui extrair mídia do link do {link.platform}.")
             continue
 
         if strip_referenced:
@@ -206,7 +206,7 @@ async def _send_single_result(
     )
 
     if not downloaded:
-        await message.reply("Could not download media from this link.")
+        await message.reply("Não consegui fazer o download da mídia deste link.")
         return None
 
     caption = truncate(format_caption(result))
