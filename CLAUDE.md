@@ -83,3 +83,18 @@ Message → LoggingMiddleware → RateLimitMiddleware
 - `conftest.py` sets dummy `TELEGRAM_BOT_TOKEN` so config doesn't fail
 - Use `AsyncMock` for async method mocking
 - Test fallback chains by making primary methods fail
+- Every new scraper/handler gets a test; bug fixes get a regression test
+- Prefer named fake classes over inline stubs when the mock has non-trivial behavior
+- Tests should be F.I.R.S.T: fast, independent, repeatable, self-validating, timely
+
+## Code Conventions
+
+- **Function/module size**: keep functions short (≈4–20 lines); split files that exceed ~500 lines by responsibility (SRP).
+- **Type hints**: required on public functions and module boundaries. Use concrete types (`dict[str, str]`, `ScrapedMedia | None`) — avoid `Any` and untyped callables.
+- **Naming**: prefer specific, unique names. Avoid generic `data`, `handler`, `manager` — names should narrow grep results, not widen them.
+- **Control flow**: early returns over nested `if`s; cap nesting at ~2 levels. Guard clauses first, happy path last.
+- **Exceptions**: error messages must include the offending value and expected shape (e.g., `f"unsupported platform: {url!r} (expected one of {Platform.__members__})"`).
+- **Comments**: write WHY, not WHAT. Reference issue numbers / commit SHAs when a line exists because of a specific bug or upstream constraint (e.g., yt-dlp signed-URL quirks). Don't strip existing comments on refactor — they carry intent and provenance.
+- **Docstrings**: on public functions/classes, state intent + one short usage example.
+- **Dependencies**: inject via parameter, not import-time globals. Scrapers receive `aiohttp.ClientSession` rather than constructing their own; keep this pattern when adding new collaborators.
+- **Wrap third-party libs**: keep adapter modules thin (`utils/ytdlp.py`, `utils/media_handler.py`). Don't sprinkle direct yt-dlp / Pillow calls across `bot/` or `scrapers/`.
