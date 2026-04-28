@@ -20,6 +20,7 @@ from src.config import settings
 # Rotating file writer
 # ---------------------------------------------------------------------------
 
+
 class RotatingFileWriter:
     """Append-only file writer with simple size-based rotation."""
 
@@ -134,11 +135,13 @@ def performance_processor(
     event = event_dict.get("event", "")
 
     if event == "message_received":
-        _perf_record.set({
-            "timestamp": event_dict.get("timestamp", _timestamp_now()),
-            "chat_id": event_dict.get("chat_id"),
-            "links": [],
-        })
+        _perf_record.set(
+            {
+                "timestamp": event_dict.get("timestamp", _timestamp_now()),
+                "chat_id": event_dict.get("chat_id"),
+                "links": [],
+            }
+        )
         return event_dict
 
     record = _perf_record.get(None)
@@ -146,12 +149,14 @@ def performance_processor(
         return event_dict
 
     if event == "media_extracted":
-        record["links"].append({
-            "platform": event_dict.get("platform", "?"),
-            "method": event_dict.get("method", "?"),
-            "extraction_ms": event_dict.get("duration_ms"),
-            "media_count": event_dict.get("media_count", 0),
-        })
+        record["links"].append(
+            {
+                "platform": event_dict.get("platform", "?"),
+                "method": event_dict.get("method", "?"),
+                "extraction_ms": event_dict.get("duration_ms"),
+                "media_count": event_dict.get("media_count", 0),
+            }
+        )
     elif event == "media_downloaded":
         if record["links"]:
             record["links"][-1]["download_ms"] = event_dict.get("duration_ms")

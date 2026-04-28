@@ -54,10 +54,12 @@ async def gallery_dl_download(
     with tempfile.TemporaryDirectory() as tmpdir:
         cmd = [
             "gallery-dl",
-            "--dest", tmpdir,
+            "--dest",
+            tmpdir,
             "--no-mtime",
             "--write-metadata",
-            "--range", "1-10",
+            "--range",
+            "1-10",
         ]
         if cookies_file:
             cmd.extend(["--cookies", cookies_file])
@@ -87,8 +89,7 @@ async def gallery_dl_download(
         # Collect downloaded media files (exclude .json metadata)
         files: list[GalleryDlFile] = []
         media_files = sorted(
-            f for f in tmppath.rglob("*")
-            if f.is_file() and f.suffix.lstrip(".") != "json"
+            f for f in tmppath.rglob("*") if f.is_file() and f.suffix.lstrip(".") != "json"
         )
 
         for media_file in media_files:

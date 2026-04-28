@@ -23,13 +23,13 @@ _USER_AGENT = (
 # Regex patterns for og: meta tags (handles both property= and name= variants,
 # and both single and double quotes, and content before/after property)
 _OG_PATTERN = re.compile(
-    r'<meta\s+(?:[^>]*?)'
+    r"<meta\s+(?:[^>]*?)"
     r'(?:property|name)\s*=\s*["\']og:(\w+)["\']'
     r'[^>]*?content\s*=\s*["\']([^"\']*?)["\']',
     re.IGNORECASE | re.DOTALL,
 )
 _OG_PATTERN_REV = re.compile(
-    r'<meta\s+(?:[^>]*?)'
+    r"<meta\s+(?:[^>]*?)"
     r'content\s*=\s*["\']([^"\']*?)["\']'
     r'[^>]*?(?:property|name)\s*=\s*["\']og:(\w+)["\']',
     re.IGNORECASE | re.DOTALL,

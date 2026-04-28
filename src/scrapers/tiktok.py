@@ -65,9 +65,7 @@ class TikTokScraper(BaseScraper):
 
         return data
 
-    async def _extract_photos(
-        self, session: aiohttp.ClientSession, data: dict
-    ) -> list[MediaItem]:
+    async def _extract_photos(self, session: aiohttp.ClientSession, data: dict) -> list[MediaItem]:
         """Download photo carousel images and return MediaItems with pre-populated data."""
         image_urls: list[str] = data.get("images", [])
         if not image_urls:
@@ -99,9 +97,7 @@ class TikTokScraper(BaseScraper):
 
         return media_items
 
-    async def _extract_video(
-        self, session: aiohttp.ClientSession, data: dict
-    ) -> list[MediaItem]:
+    async def _extract_video(self, session: aiohttp.ClientSession, data: dict) -> list[MediaItem]:
         """Download video from tikwm data and return MediaItems with pre-populated data."""
         video_url = data.get("hdplay") or data.get("play")
         if not video_url:

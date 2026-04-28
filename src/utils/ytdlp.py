@@ -73,13 +73,18 @@ async def ytdlp_download(
         format_spec = f"bv*+ba[filesize<{max_size}]/bv*+ba/b[filesize<{max_size}]/b"
         cmd = [
             "yt-dlp",
-            "-o", output_template,
+            "-o",
+            output_template,
             "--no-playlist",
-            "-f", format_spec,
-            "--max-filesize", f"{settings.max_file_size_mb}M",
+            "-f",
+            format_spec,
+            "--max-filesize",
+            f"{settings.max_file_size_mb}M",
             "--write-info-json",
-            "--socket-timeout", str(settings.download_timeout_seconds),
-            "--remote-components", "ejs:github",
+            "--socket-timeout",
+            str(settings.download_timeout_seconds),
+            "--remote-components",
+            "ejs:github",
         ]
         if cookies_file:
             # Copy cookies to a separate subdirectory so yt-dlp can save updated
@@ -111,8 +116,7 @@ async def ytdlp_download(
         tmppath = Path(tmpdir)
         info_files = list(tmppath.glob("*.info.json"))
         media_files = [
-            f for f in tmppath.iterdir()
-            if f.is_file() and not f.name.endswith(".info.json")
+            f for f in tmppath.iterdir() if f.is_file() and not f.name.endswith(".info.json")
         ]
 
         info: dict = {}

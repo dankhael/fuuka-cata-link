@@ -196,9 +196,7 @@ async def test_fbscraper_fallback_images():
         patch("aiohttp.ClientSession", return_value=mock_session),
     ):
         scraper = FacebookScraper()
-        result = await scraper._fbscraper_fallback(
-            "https://www.facebook.com/photo/123"
-        )
+        result = await scraper._fbscraper_fallback("https://www.facebook.com/photo/123")
 
     assert result.platform == Platform.FACEBOOK
     assert result.author == "photographer"
@@ -234,9 +232,7 @@ async def test_fbscraper_fallback_video():
         patch("aiohttp.ClientSession", return_value=mock_session),
     ):
         scraper = FacebookScraper()
-        result = await scraper._fbscraper_fallback(
-            "https://www.facebook.com/watch?v=456"
-        )
+        result = await scraper._fbscraper_fallback("https://www.facebook.com/watch?v=456")
 
     assert result.author == "creator"
     assert result.caption == "Funny reel"
@@ -324,9 +320,7 @@ def test_read_cookies_for_domain_missing_file():
 def test_read_cookies_for_domain_no_matching_domain(tmp_path):
     """Returns None when no cookies match the domain."""
     cookies_file = tmp_path / "cookies.txt"
-    cookies_file.write_text(
-        ".google.com\tTRUE\t/\tTRUE\t0\tNID\t999\n"
-    )
+    cookies_file.write_text(".google.com\tTRUE\t/\tTRUE\t0\tNID\t999\n")
 
     result = _read_cookies_for_domain(str(cookies_file), "facebook.com")
     assert result is None

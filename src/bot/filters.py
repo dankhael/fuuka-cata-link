@@ -24,9 +24,7 @@ class ContainsCommand(BaseFilter):
         self.command = command
         # Standalone token: preceded by start-of-string or whitespace, followed
         # by end-of-string or whitespace. Optional @botname suffix is allowed.
-        self.pattern = re.compile(
-            rf"(?:^|\s)/{re.escape(command)}(?:@\w+)?(?=\s|$)"
-        )
+        self.pattern = re.compile(rf"(?:^|\s)/{re.escape(command)}(?:@\w+)?(?=\s|$)")
 
     async def __call__(self, message: Message) -> bool:
         if not message.text:
