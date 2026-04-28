@@ -14,7 +14,7 @@ from aiogram.types import (
     ReplyParameters,
 )
 
-from src.bot.filters import AllowedChat, ContainsSupportedLink
+from src.bot.filters import AllowedChat, ContainsCommand, ContainsSupportedLink
 from src.config import settings
 from src.scrapers.base import MediaType, ScrapedMedia
 from src.utils.formatters import format_caption, format_text_post, truncate
@@ -117,19 +117,19 @@ async def handle_help(message: Message) -> None:
     await message.reply(HELP_TEXT, parse_mode="HTML")
 
 
-@router.message(Command("ignore"), AllowedChat(), ContainsSupportedLink())
+@router.message(ContainsCommand("ignore"), AllowedChat(), ContainsSupportedLink())
 async def handle_ignore(message: Message, detected_links: list[DetectedLink]) -> None:
     """Silently ignore a supported link — do not scrape or reply."""
     logger.debug("link_ignored", urls=[link.url for link in detected_links])
 
 
-@router.message(Command("noreply"), AllowedChat(), ContainsSupportedLink())
+@router.message(ContainsCommand("noreply"), AllowedChat(), ContainsSupportedLink())
 async def handle_noreply(message: Message, detected_links: list[DetectedLink]) -> None:
     """Scrape the link but strip the referenced post (quote/reply parent)."""
     await _process_links(message, detected_links, strip_referenced=True)
 
 
-@router.message(Command("nocaption"), AllowedChat(), ContainsSupportedLink())
+@router.message(ContainsCommand("nocaption"), AllowedChat(), ContainsSupportedLink())
 async def handle_nocaption(message: Message, detected_links: list[DetectedLink]) -> None:
     """Scrape the link's media only — drop the caption text.
 

@@ -1,10 +1,37 @@
 from __future__ import annotations
 
+import re
+
 from aiogram.filters import BaseFilter
 from aiogram.types import Message
 
 from src.config import settings
 from src.utils.link_detector import DetectedLink, detect_links
+
+
+class ContainsCommand(BaseFilter):
+    """Filter that matches messages containing ``/command`` anywhere in the text.
+
+    Unlike aiogram's built-in :class:`~aiogram.filters.Command`, which only
+    fires when the command is the very first token, this filter accepts the
+    command as a standalone token at any position — so users can write either
+    ``/nocaption https://...`` or ``https://... /nocaption``.
+
+    The optional ``@botname`` suffix Telegram appends in groups is tolerated.
+    """
+
+    def __init__(self, command: str) -> None:
+        self.command = command
+        # Standalone token: preceded by start-of-string or whitespace, followed
+        # by end-of-string or whitespace. Optional @botname suffix is allowed.
+        self.pattern = re.compile(
+            rf"(?:^|\s)/{re.escape(command)}(?:@\w+)?(?=\s|$)"
+        )
+
+    async def __call__(self, message: Message) -> bool:
+        if not message.text:
+            return False
+        return self.pattern.search(message.text) is not None
 
 
 class ContainsSupportedLink(BaseFilter):
