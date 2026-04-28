@@ -1,4 +1,3 @@
-import pytest
 
 from src.utils.link_detector import Platform, detect_links
 

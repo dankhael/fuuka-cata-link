@@ -69,11 +69,13 @@ async def ytdlp_download(
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         output_template = str(Path(tmpdir) / "media.%(ext)s")
+        max_size = f"{settings.max_file_size_mb}M"
+        format_spec = f"bv*+ba[filesize<{max_size}]/bv*+ba/b[filesize<{max_size}]/b"
         cmd = [
             "yt-dlp",
             "-o", output_template,
             "--no-playlist",
-            "-f", f"bv*+ba[filesize<{settings.max_file_size_mb}M]/bv*+ba/b[filesize<{settings.max_file_size_mb}M]/b",
+            "-f", format_spec,
             "--max-filesize", f"{settings.max_file_size_mb}M",
             "--write-info-json",
             "--socket-timeout", str(settings.download_timeout_seconds),

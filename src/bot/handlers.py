@@ -108,7 +108,8 @@ Eu extraio e reencaminho automaticamente mídias de links compartilhados neste c
 /nocaption — enviar apenas a mídia (imagem/vídeo) sem a legenda
 
 <b>Como funciona:</b>
-Basta compartilhar um link suportado e eu respondo com a mídia ou conteúdo do post. Para spoilers, coloque o link em uma tag de spoiler antes."""
+Basta compartilhar um link suportado e eu respondo com a mídia ou conteúdo do post. \
+Para spoilers, coloque o link em uma tag de spoiler antes."""
 
 
 @router.message(Command("help"))

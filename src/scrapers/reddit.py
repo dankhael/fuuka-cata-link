@@ -91,14 +91,16 @@ class RedditScraper(BaseScraper):
             for _media_id, meta in post["media_metadata"].items():
                 if meta.get("status") == "valid" and meta.get("s", {}).get("u"):
                     img_url = meta["s"]["u"].replace("&amp;", "&")
-                    media_type = MediaType.ANIMATION if img_url.lower().endswith(".gif") else MediaType.IMAGE
+                    is_gif = img_url.lower().endswith(".gif")
+                    media_type = MediaType.ANIMATION if is_gif else MediaType.IMAGE
                     media_items.append(MediaItem(url=img_url, media_type=media_type))
         # Check for external link with preview image
         elif post.get("post_hint") == "link" and post.get("preview"):
             images = post["preview"].get("images", [])
             if images:
                 img_url = images[0]["source"]["url"].replace("&amp;", "&")
-                media_type = MediaType.ANIMATION if img_url.lower().endswith(".gif") else MediaType.IMAGE
+                is_gif = img_url.lower().endswith(".gif")
+                media_type = MediaType.ANIMATION if is_gif else MediaType.IMAGE
                 media_items.append(MediaItem(url=img_url, media_type=media_type))
 
         caption = title

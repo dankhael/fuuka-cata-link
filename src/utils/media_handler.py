@@ -62,7 +62,8 @@ async def download_media(
             await session.close()
 
     result = [item for item in items if item.data is not None]
-    logger.info("media_downloaded", count=len(result), duration_ms=int((time.monotonic() - start) * 1000))
+    duration_ms = int((time.monotonic() - start) * 1000)
+    logger.info("media_downloaded", count=len(result), duration_ms=duration_ms)
     return result
 
 

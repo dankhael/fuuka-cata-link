@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.scrapers.github import GitHubScraper
 from src.utils.link_detector import Platform
