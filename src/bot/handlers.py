@@ -14,7 +14,7 @@ from aiogram.types import (
     ReplyParameters,
 )
 
-from src.bot.filters import AllowedChat, ContainsSupportedLink
+from src.bot.filters import AllowedChat, ContainsCommand, ContainsSupportedLink
 from src.config import settings
 from src.scrapers.base import MediaType, ScrapedMedia
 from src.utils.formatters import format_caption, format_text_post, truncate
@@ -44,11 +44,16 @@ async def _process_links(
     detected_links: list[DetectedLink],
     *,
     strip_referenced: bool = False,
+    strip_caption: bool = False,
 ) -> None:
     """Scrape each detected link and send results.
 
     When *strip_referenced* is True, any referenced_post (quote/reply parent)
     is stripped before sending — the bot sends only the linked post itself.
+
+    When *strip_caption* is True, the post's caption text is dropped before
+    sending (media-only mode). Text-only posts are skipped silently in this
+    mode since there is no media to send.
     """
     for link in detected_links:
         scraper = _SCRAPER_MAP.get(link.platform)
@@ -65,26 +70,72 @@ async def _process_links(
                 url=link.url,
                 error=str(exc),
             )
-            await message.reply(f"Failed to extract media from {link.platform} link.")
+            await message.reply(f"Não consegui extrair mídia do link do {link.platform}.")
             continue
 
         if strip_referenced:
             result.referenced_post = None
             result.reference_type = None
 
+        if strip_caption:
+            if not result.has_media:
+                logger.debug("nocaption_text_only_skipped", url=link.url)
+                continue
+            result.caption = None
+            if result.referenced_post is not None:
+                result.referenced_post.caption = None
+
         await _send_result(message, result, has_spoiler=link.is_spoiler)
 
 
-@router.message(Command("ignore"), AllowedChat(), ContainsSupportedLink())
+HELP_TEXT = """<b>Fuuka</b> — expansora de links de redes sociais
+
+Eu extraio e reencaminho automaticamente mídias de links compartilhados neste chat.
+
+<b>Plataformas suportadas:</b>
+• Twitter / X
+• YouTube
+• Instagram (somente reels no momento)
+• TikTok
+• Facebook (somente reels no momento)
+• GitHub (repositórios, PRs, issues)
+• Reddit
+
+<b>Comandos:</b>
+/help — exibir esta mensagem
+/ignore — postar um link sem eu expandir
+/noreply — expandir o link mas ocultar o post citado/respondido
+/nocaption — enviar apenas a mídia (imagem/vídeo) sem a legenda
+
+<b>Como funciona:</b>
+Basta compartilhar um link suportado e eu respondo com a mídia ou conteúdo do post. Para spoilers, coloque o link em uma tag de spoiler antes."""
+
+
+@router.message(Command("help"))
+async def handle_help(message: Message) -> None:
+    """Send a help message explaining Fuuka's features and commands."""
+    await message.reply(HELP_TEXT, parse_mode="HTML")
+
+
+@router.message(ContainsCommand("ignore"), AllowedChat(), ContainsSupportedLink())
 async def handle_ignore(message: Message, detected_links: list[DetectedLink]) -> None:
     """Silently ignore a supported link — do not scrape or reply."""
     logger.debug("link_ignored", urls=[link.url for link in detected_links])
 
 
-@router.message(Command("noreply"), AllowedChat(), ContainsSupportedLink())
+@router.message(ContainsCommand("noreply"), AllowedChat(), ContainsSupportedLink())
 async def handle_noreply(message: Message, detected_links: list[DetectedLink]) -> None:
     """Scrape the link but strip the referenced post (quote/reply parent)."""
     await _process_links(message, detected_links, strip_referenced=True)
+
+
+@router.message(ContainsCommand("nocaption"), AllowedChat(), ContainsSupportedLink())
+async def handle_nocaption(message: Message, detected_links: list[DetectedLink]) -> None:
+    """Scrape the link's media only — drop the caption text.
+
+    Text-only posts are silently ignored since there is no media to send.
+    """
+    await _process_links(message, detected_links, strip_caption=True)
 
 
 @router.message(AllowedChat(), ContainsSupportedLink())
@@ -155,7 +206,7 @@ async def _send_single_result(
     )
 
     if not downloaded:
-        await message.reply("Could not download media from this link.")
+        await message.reply("Não consegui fazer o download da mídia deste link.")
         return None
 
     caption = truncate(format_caption(result))

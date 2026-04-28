@@ -16,9 +16,7 @@ class YouTubeScraper(BaseScraper):
         return await self._ytdlp_extract(url)
 
     async def _ytdlp_extract(self, url: str) -> ScrapedMedia:
-        extra_args = ["--cookies", str(settings.cookies_file)] if settings.cookies_file else []
-
-        result = await ytdlp_download(url, extra_args=extra_args)
+        result = await ytdlp_download(url, cookies_file=settings.cookies_file)
 
         # Reject videos longer than 5 minutes 18 seconds
         if result.duration and result.duration > 318:
