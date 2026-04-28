@@ -93,12 +93,7 @@ class BaseScraper(ABC):
                 )
 
         logger.error("all_extraction_methods_failed", platform=self.platform, url=url)
-        return ScrapedMedia(
-            platform=self.platform,
-            original_url=url,
-            caption="Could not extract media from this link.",
-            method_used="none",
-        )
+        raise RuntimeError(f"all extraction methods failed for {self.platform} url: {url!r}")
 
     @abstractmethod
     async def _primary_extract(self, url: str) -> ScrapedMedia:
