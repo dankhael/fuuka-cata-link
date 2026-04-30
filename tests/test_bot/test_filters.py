@@ -1,31 +1,26 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 
-from src.bot.filters import ContainsCommand
-
-
-def _msg(text: str | None) -> MagicMock:
-    m = MagicMock()
-    m.text = text
-    return m
+from src.bot.handlers import _find_commands
 
 
 @pytest.mark.parametrize(
-    "text",
+    "text,expected",
     [
-        "/nocaption https://x.com/u/status/1",
-        "https://x.com/u/status/1 /nocaption",
-        "before /nocaption after",
-        "/nocaption@MyBot https://x.com/u/status/1",
-        "https://x.com/u/status/1 /nocaption@MyBot",
-        "/nocaption",
+        ("/nocaption https://x.com/u/status/1", {"nocaption"}),
+        ("https://x.com/u/status/1 /nocaption", {"nocaption"}),
+        ("before /nocaption after", {"nocaption"}),
+        ("/nocaption@MyBot https://x.com/u/status/1", {"nocaption"}),
+        ("https://x.com/u/status/1 /nocaption@MyBot", {"nocaption"}),
+        ("/nocaption", {"nocaption"}),
+        ("/noreply /nocaption https://x.com/u/status/1", {"noreply", "nocaption"}),
+        ("/ignore /noreply /nocaption", {"ignore", "noreply", "nocaption"}),
+        ("/nocaption /nocaption again", {"nocaption"}),
     ],
 )
-async def test_contains_command_matches_anywhere(text):
-    assert await ContainsCommand("nocaption")(_msg(text)) is True
+def test_find_commands_matches(text, expected):
+    assert _find_commands(text) == expected
 
 
 @pytest.mark.parametrize(
@@ -35,9 +30,10 @@ async def test_contains_command_matches_anywhere(text):
         "/nocaptionx https://x.com/u/status/1",  # token must end at boundary
         "x/nocaption",  # not preceded by whitespace
         "look at this/nocaption",
+        "/unknowncmd https://x.com/u/status/1",
         "",
         None,
     ],
 )
-async def test_contains_command_rejects_non_matches(text):
-    assert await ContainsCommand("nocaption")(_msg(text)) is False
+def test_find_commands_rejects_non_matches(text):
+    assert _find_commands(text) == set()

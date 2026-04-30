@@ -145,7 +145,9 @@ async def test_send_single_result_text_post_no_spoiler_unchanged():
     assert "<tg-spoiler>" not in sent_text
 
 
-async def test_handle_nocaption_dispatches_with_strip_caption():
+async def _capture_handle(text: str):
+    """Run handle_media_link with the given text and capture the flags
+    forwarded to _process_links."""
     captured: dict = {}
 
     async def fake_process(msg, links, *, strip_referenced=False, strip_caption=False):
@@ -154,13 +156,51 @@ async def test_handle_nocaption_dispatches_with_strip_caption():
         captured["links"] = links
 
     message = AsyncMock()
+    message.text = text
     links = [_link()]
 
     with patch.object(handlers, "_process_links", fake_process):
-        await handlers.handle_nocaption(message, links)
+        await handlers.handle_media_link(message, links)
 
-    assert captured == {
-        "strip_caption": True,
-        "strip_referenced": False,
-        "links": links,
-    }
+    return captured
+
+
+async def test_handle_media_link_no_command_uses_defaults():
+    captured = await _capture_handle("https://x.com/u/status/1")
+    assert captured["strip_caption"] is False
+    assert captured["strip_referenced"] is False
+
+
+async def test_handle_media_link_nocaption_sets_strip_caption():
+    captured = await _capture_handle("/nocaption https://x.com/u/status/1")
+    assert captured["strip_caption"] is True
+    assert captured["strip_referenced"] is False
+
+
+async def test_handle_media_link_noreply_sets_strip_referenced():
+    captured = await _capture_handle("/noreply https://x.com/u/status/1")
+    assert captured["strip_caption"] is False
+    assert captured["strip_referenced"] is True
+
+
+async def test_handle_media_link_combines_noreply_and_nocaption():
+    captured = await _capture_handle("/noreply /nocaption https://x.com/u/status/1")
+    assert captured["strip_caption"] is True
+    assert captured["strip_referenced"] is True
+
+
+async def test_handle_media_link_command_order_does_not_matter():
+    captured = await _capture_handle("https://x.com/u/status/1 /nocaption /noreply")
+    assert captured["strip_caption"] is True
+    assert captured["strip_referenced"] is True
+
+
+async def test_handle_media_link_ignore_short_circuits():
+    process = AsyncMock()
+    message = AsyncMock()
+    message.text = "/ignore /nocaption /noreply https://x.com/u/status/1"
+
+    with patch.object(handlers, "_process_links", process):
+        await handlers.handle_media_link(message, [_link()])
+
+    process.assert_not_awaited()

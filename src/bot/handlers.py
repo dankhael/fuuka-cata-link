@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 
 import structlog
@@ -14,7 +15,7 @@ from aiogram.types import (
     ReplyParameters,
 )
 
-from src.bot.filters import AllowedChat, ContainsCommand, ContainsSupportedLink
+from src.bot.filters import AllowedChat, ContainsSupportedLink
 from src.config import settings
 from src.scrapers.base import MediaType, ScrapedMedia
 from src.utils.formatters import format_caption, format_text_post, truncate
@@ -118,31 +119,43 @@ async def handle_help(message: Message) -> None:
     await message.reply(HELP_TEXT, parse_mode="HTML")
 
 
-@router.message(ContainsCommand("ignore"), AllowedChat(), ContainsSupportedLink())
-async def handle_ignore(message: Message, detected_links: list[DetectedLink]) -> None:
-    """Silently ignore a supported link — do not scrape or reply."""
-    logger.debug("link_ignored", urls=[link.url for link in detected_links])
+_COMMAND_NAMES: tuple[str, ...] = ("ignore", "noreply", "nocaption")
+# Standalone-token match so ``/nocaption`` works at any position in the text but
+# not when glued to other characters (``x/nocaption``). Optional ``@botname``
+# suffix is tolerated for group chats.
+_COMMAND_PATTERN = re.compile(
+    rf"(?:^|\s)/({'|'.join(_COMMAND_NAMES)})(?:@\w+)?(?=\s|$)"
+)
 
 
-@router.message(ContainsCommand("noreply"), AllowedChat(), ContainsSupportedLink())
-async def handle_noreply(message: Message, detected_links: list[DetectedLink]) -> None:
-    """Scrape the link but strip the referenced post (quote/reply parent)."""
-    await _process_links(message, detected_links, strip_referenced=True)
+def _find_commands(text: str | None) -> set[str]:
+    """Return every supported command name that appears in *text*.
 
-
-@router.message(ContainsCommand("nocaption"), AllowedChat(), ContainsSupportedLink())
-async def handle_nocaption(message: Message, detected_links: list[DetectedLink]) -> None:
-    """Scrape the link's media only — drop the caption text.
-
-    Text-only posts are silently ignored since there is no media to send.
+    All commands present in a single message take effect — ``/noreply
+    /nocaption https://...`` activates both flags at once. ``/ignore`` wins
+    over the others (handled by the caller).
     """
-    await _process_links(message, detected_links, strip_caption=True)
+    if not text:
+        return set()
+    return set(_COMMAND_PATTERN.findall(text))
 
 
 @router.message(AllowedChat(), ContainsSupportedLink())
 async def handle_media_link(message: Message, detected_links: list[DetectedLink]) -> None:
-    """Process a message that contains one or more supported social media links."""
-    await _process_links(message, detected_links)
+    """Process a message containing supported links, honoring any combination
+    of ``/ignore``, ``/noreply``, ``/nocaption`` present in the text."""
+    commands = _find_commands(message.text)
+
+    if "ignore" in commands:
+        logger.debug("link_ignored", urls=[link.url for link in detected_links])
+        return
+
+    await _process_links(
+        message,
+        detected_links,
+        strip_referenced="noreply" in commands,
+        strip_caption="nocaption" in commands,
+    )
 
 
 async def _send_result(
