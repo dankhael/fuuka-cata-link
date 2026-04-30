@@ -98,3 +98,14 @@ Message → LoggingMiddleware → RateLimitMiddleware
 - **Docstrings**: on public functions/classes, state intent + one short usage example.
 - **Dependencies**: inject via parameter, not import-time globals. Scrapers receive `aiohttp.ClientSession` rather than constructing their own; keep this pattern when adding new collaborators.
 - **Wrap third-party libs**: keep adapter modules thin (`utils/ytdlp.py`, `utils/media_handler.py`). Don't sprinkle direct yt-dlp / Pillow calls across `bot/` or `scrapers/`.
+
+## Branching
+
+Trunk-based off `master`. `master` is always deployable and protected — never push to it directly; every change goes through a PR.
+
+- **Branch name**: `type/DAN-ID-slug` (e.g. `feat/DAN-42-spoiler-captions`, `fix/DAN-58-rate-limit-bug`).
+  - `type` ∈ {`feat`, `fix`, `refactor`, `docs`, `chore`, `test`, `perf`} — same set as the conventional-commit prefixes used in commit messages.
+  - `DAN-ID` is the Linear issue identifier (uppercase). Including it auto-links the PR to the issue and drives the issue's status: Started → In Review (PR opened) → Done (PR merged).
+  - `slug` is lowercase kebab-case, 2-5 words, derived from the Linear issue title.
+- **One issue per branch**. If scope creeps, split the Linear issue and open a second branch.
+- **Merge style**: squash-merge to keep `master` history linear. Branches auto-delete on merge.

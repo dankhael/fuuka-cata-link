@@ -180,6 +180,20 @@ ruff check --fix src/ tests/
 ruff format src/ tests/
 ```
 
+### Contributing
+
+Work happens on short-lived branches off `master` (trunk-based). `master` is protected — every change lands via a PR with passing CI, then squash-merged.
+
+Branch naming: `type/DAN-ID-slug`, where `type` is one of `feat` / `fix` / `refactor` / `docs` / `chore` / `test` / `perf`, `DAN-ID` is the Linear issue identifier, and `slug` is a 2-5 word lowercase kebab-case summary.
+
+```
+feat/DAN-42-spoiler-captions
+fix/DAN-58-rate-limit-bug
+refactor/DAN-71-base-scraper-errors
+```
+
+Including the Linear ID lets Linear auto-link the PR to its issue and move it through Started → In Review → Done.
+
 ### Adding a New Platform
 
 1. Create `src/scrapers/<platform>.py` extending `BaseScraper`
