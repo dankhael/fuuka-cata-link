@@ -110,6 +110,41 @@ async def test_default_mode_keeps_caption():
     assert sent.caption == "keep me"
 
 
+def test_wrap_spoiler_wraps_when_flag_set():
+    assert handlers._wrap_spoiler("hello", True) == "<tg-spoiler>hello</tg-spoiler>"
+
+
+def test_wrap_spoiler_passthrough_when_flag_unset():
+    assert handlers._wrap_spoiler("hello", False) == "hello"
+
+
+def test_wrap_spoiler_empty_text_unchanged():
+    assert handlers._wrap_spoiler("", True) == ""
+
+
+async def test_send_single_result_spoilers_text_post():
+    message = AsyncMock()
+    result = _result(caption="secret", with_media=False)
+
+    await handlers._send_single_result(message, result, has_spoiler=True)
+
+    message.reply.assert_awaited_once()
+    sent_text = message.reply.await_args.args[0]
+    assert sent_text.startswith("<tg-spoiler>")
+    assert sent_text.endswith("</tg-spoiler>")
+    assert "secret" in sent_text
+
+
+async def test_send_single_result_text_post_no_spoiler_unchanged():
+    message = AsyncMock()
+    result = _result(caption="public", with_media=False)
+
+    await handlers._send_single_result(message, result, has_spoiler=False)
+
+    sent_text = message.reply.await_args.args[0]
+    assert "<tg-spoiler>" not in sent_text
+
+
 async def test_handle_nocaption_dispatches_with_strip_caption():
     captured: dict = {}
 
