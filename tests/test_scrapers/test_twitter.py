@@ -328,6 +328,44 @@ async def test_twitter_quote_takes_priority_over_reply():
 
 
 @pytest.mark.asyncio
+async def test_twitter_fixupx_fallback_when_all_methods_fail():
+    """When primary, yt-dlp, and browser extractions all raise, extract()
+    returns a text-only ScrapedMedia whose caption is the fixupx URL so
+    Telegram can render its link preview."""
+    scraper = TwitterScraper()
+
+    boom = AsyncMock(side_effect=RuntimeError("boom"))
+    with (
+        patch.object(scraper, "_primary_extract", boom),
+        patch.object(scraper, "_ytdlp_extract", boom),
+        patch.object(scraper, "_browser_extract", boom),
+    ):
+        result = await scraper.extract("https://x.com/user/status/123")
+
+    assert result.platform == Platform.TWITTER
+    assert result.method_used == "fixupx-fallback"
+    assert result.has_media is False
+    assert result.caption == "https://fixupx.com/user/status/123"
+    assert result.original_url == "https://x.com/user/status/123"
+
+
+@pytest.mark.asyncio
+async def test_twitter_fixupx_fallback_rewrites_twitter_dot_com():
+    """Both twitter.com and x.com URLs are rewritten to fixupx.com."""
+    scraper = TwitterScraper()
+
+    boom = AsyncMock(side_effect=RuntimeError("boom"))
+    with (
+        patch.object(scraper, "_primary_extract", boom),
+        patch.object(scraper, "_ytdlp_extract", boom),
+        patch.object(scraper, "_browser_extract", boom),
+    ):
+        result = await scraper.extract("https://twitter.com/user/status/456")
+
+    assert result.caption == "https://fixupx.com/user/status/456"
+
+
+@pytest.mark.asyncio
 async def test_twitter_gif_parsed_as_video():
     """GIF media type in fxtwitter is treated as animation."""
     api_data = _fx_tweet(

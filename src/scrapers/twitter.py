@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlparse, urlunparse
+
 import aiohttp
 import structlog
 
@@ -12,12 +14,47 @@ logger = structlog.get_logger()
 
 _FX_API_BASE = "https://api.fxtwitter.com"
 _FX_TIMEOUT = aiohttp.ClientTimeout(total=15)
+_FIXUPX_HOST = "fixupx.com"
+
+
+def _to_fixupx_url(url: str) -> str:
+    """Rewrite a twitter.com / x.com URL to its fixupx.com equivalent.
+
+    Telegram's link preview expands fixupx URLs into a tweet card with the
+    text and media inlined, so posting the rewritten link is a good last
+    resort when scraping fails outright.
+
+    Swaps the netloc rather than doing a blind string replace because
+    "fixupx.com" itself contains "x.com" as a suffix — a chained .replace
+    would double-rewrite (twitter.com → fixupx.com → fixupfixupx.com).
+    """
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if host in {"twitter.com", "www.twitter.com", "x.com", "www.x.com"}:
+        return urlunparse(parsed._replace(netloc=_FIXUPX_HOST))
+    return url
 
 
 class TwitterScraper(BaseScraper):
     @property
     def platform(self) -> Platform:
         return Platform.TWITTER
+
+    async def extract(self, url: str) -> ScrapedMedia:
+        """Run the standard fallback chain; if every method fails, return a
+        text-only result containing the fixupx.com link so Telegram's link
+        preview renders the tweet card inline."""
+        try:
+            return await super().extract(url)
+        except RuntimeError:
+            fixupx_url = _to_fixupx_url(url)
+            logger.info("twitter_fixupx_fallback", url=url, fixupx_url=fixupx_url)
+            return ScrapedMedia(
+                platform=self.platform,
+                original_url=url,
+                caption=fixupx_url,
+                method_used="fixupx-fallback",
+            )
 
     async def _primary_extract(self, url: str) -> ScrapedMedia:
         """Use the fxtwitter API for extraction with reply/quote support."""
