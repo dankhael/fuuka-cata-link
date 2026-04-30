@@ -170,6 +170,18 @@ async def _send_result(
     )
 
 
+def _wrap_spoiler(text: str, has_spoiler: bool) -> str:
+    """Wrap text in a Telegram <tg-spoiler> tag when has_spoiler is True.
+
+    Caption-level spoilering complements the media-level has_spoiler flag so
+    the post text is also hidden behind a click-to-reveal blur, matching the
+    user's intent when they shared the link inside a spoiler span.
+    """
+    if not has_spoiler or not text:
+        return text
+    return f"<tg-spoiler>{text}</tg-spoiler>"
+
+
 async def _send_single_result(
     message: Message,
     result: ScrapedMedia,
@@ -186,10 +198,11 @@ async def _send_single_result(
     reply_params = ReplyParameters(message_id=reply_to_message_id) if reply_to_message_id else None
 
     if not result.has_media:
-        text = format_text_post(result)
+        text = truncate(format_text_post(result), max_len=4096)
+        text = _wrap_spoiler(text, has_spoiler)
         if reply_params:
-            return await message.answer(truncate(text, max_len=4096), reply_parameters=reply_params)
-        return await message.reply(truncate(text, max_len=4096))
+            return await message.answer(text, reply_parameters=reply_params)
+        return await message.reply(text)
 
     # Download items that don't already have data
     items_needing_download = [item for item in result.media_items if item.data is None]
@@ -209,7 +222,7 @@ async def _send_single_result(
         await message.reply("Não consegui fazer o download da mídia deste link.")
         return None
 
-    caption = truncate(format_caption(result))
+    caption = _wrap_spoiler(truncate(format_caption(result)), has_spoiler)
 
     send_start = time.monotonic()
 
