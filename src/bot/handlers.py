@@ -123,9 +123,7 @@ _COMMAND_NAMES: tuple[str, ...] = ("ignore", "noreply", "nocaption")
 # Standalone-token match so ``/nocaption`` works at any position in the text but
 # not when glued to other characters (``x/nocaption``). Optional ``@botname``
 # suffix is tolerated for group chats.
-_COMMAND_PATTERN = re.compile(
-    rf"(?:^|\s)/({'|'.join(_COMMAND_NAMES)})(?:@\w+)?(?=\s|$)"
-)
+_COMMAND_PATTERN = re.compile(rf"(?:^|\s)/({'|'.join(_COMMAND_NAMES)})(?:@\w+)?(?=\s|$)")
 
 
 def _find_commands(text: str | None) -> set[str]:
