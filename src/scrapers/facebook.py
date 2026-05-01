@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 
@@ -42,6 +43,89 @@ _BROWSER_HEADERS: dict[str, str] = {
 
 # Facebook tracking params to strip from resolved URLs
 _FB_TRACKING_PARAMS = {"rdid", "share_url", "refsrc", "_rdr", "__tn__", "ref", "mibextid"}
+
+# Markers that indicate the start of related-post / suggestion / comment sections
+# on mbasic permalink pages and the FB embed plugin. Cutting HTML at the earliest
+# match keeps later image regexes from grabbing neighbour-post images that share
+# the scontent.fbcdn.net domain (the user-reported "wrong-image" bug).
+_FB_RELATED_BOUNDARIES: tuple[str, ...] = (
+    r'<div\s+id=["\']composer_root',
+    r'<div\s+id=["\']see_next',
+    r'<div\s+id=["\']m_more_about',
+    r"\bMore from this Page\b",
+    r"\bRelated (?:videos|posts|content)\b",
+    r"\bSuggested for You\b",
+    r"\bPeople You May Know\b",
+    r"\bSee more on Facebook\b",
+    r"\bMost relevant\b",
+)
+
+
+def _truncate_at_related_content(html: str) -> str:
+    """Cut HTML at the earliest related-content / comments marker.
+
+    mbasic and the FB embed plugin render the target post first, then sections
+    that share the same scontent.fbcdn.net domain — running broad image regexes
+    over the whole document conflates the two. This narrows the haystack.
+    """
+    earliest = len(html)
+    for pattern in _FB_RELATED_BOUNDARIES:
+        m = re.search(pattern, html, re.IGNORECASE)
+        if m and m.start() < earliest:
+            earliest = m.start()
+    return html[:earliest]
+
+
+def _extract_author_from_html(html: str) -> str | None:
+    """Extract the post author from JSON-LD, mbasic header, or og:title.
+
+    Falls back through three sources because Facebook serves different markup
+    depending on the surface (mbasic vs www vs embed plugin).
+    """
+    for m in re.finditer(
+        r"<script[^>]*application/ld\+json[^>]*>(.*?)</script>",
+        html,
+        re.DOTALL | re.IGNORECASE,
+    ):
+        try:
+            data = json.loads(m.group(1).strip())
+        except (json.JSONDecodeError, ValueError):
+            continue
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            author = item.get("author")
+            if isinstance(author, dict):
+                name = author.get("name")
+                if isinstance(name, str) and name.strip():
+                    return name.strip()
+            elif isinstance(author, str) and author.strip():
+                return author.strip()
+
+    # mbasic: <h3><strong><a href="/profile">Name</a></strong></h3>
+    m = re.search(
+        r'<h3[^>]*>\s*<strong[^>]*>\s*<a[^>]+href="/[^"]*"[^>]*>([^<]+)</a>',
+        html,
+        re.IGNORECASE,
+    )
+    if m:
+        name = m.group(1).strip()
+        if name:
+            return name
+
+    # og:title — often just the author name (or "Name | Facebook")
+    m = re.search(
+        r'<meta\s+[^>]*?property=["\']og:title["\'][^>]*?content=["\']([^"\']+)["\']',
+        html,
+        re.IGNORECASE,
+    )
+    if m:
+        title = re.sub(r"\s*[|\-]\s*Facebook\s*$", "", m.group(1).strip(), flags=re.IGNORECASE)
+        if title:
+            return title
+
+    return None
 
 
 def _dbg(event: str, **kwargs: object) -> None:
@@ -366,30 +450,28 @@ class FacebookScraper(BaseScraper):
         item = MediaItem(url=image_url, media_type=MediaType.IMAGE)
         item.data = data
 
-        # Extract caption from og:title / og:description
-        title_match = re.search(
-            r'<meta\s+[^>]*?property=["\']og:title["\'][^>]*?content=["\']([^"\']*)["\']',
-            html,
-            re.IGNORECASE,
-        )
+        # Caption: prefer og:description (post body) over og:title (often author name)
         desc_match = re.search(
             r'<meta\s+[^>]*?property=["\']og:description["\'][^>]*?content=["\']([^"\']*)["\']',
             html,
             re.IGNORECASE,
         )
-
         caption = None
         if desc_match and desc_match.group(1):
             caption = desc_match.group(1).replace("&amp;", "&")
-        elif title_match and title_match.group(1):
-            caption = title_match.group(1).replace("&amp;", "&")
 
-        _dbg("fb_og_success", caption_length=len(caption) if caption else 0)
+        author = _extract_author_from_html(html)
+
+        _dbg(
+            "fb_og_success",
+            caption_length=len(caption) if caption else 0,
+            has_author=author is not None,
+        )
 
         return ScrapedMedia(
             platform=self.platform,
             original_url=url,
-            author=None,
+            author=author,
             caption=caption,
             media_items=[item],
         )
@@ -426,45 +508,31 @@ class FacebookScraper(BaseScraper):
 
         _dbg("fb_embed_html_received", length=len(html))
 
-        # The embed page includes full-resolution image URLs in the rendered HTML
-        # Look for scaledImageFitWidth (main post image) or data-src on img tags
+        # Scope to the embedded post: drop everything past the related-content marker.
+        # Why: the embed plugin used to render strictly one post, but FB now injects
+        # 'See more on Facebook' / suggestions whose images live on the same CDN —
+        # the old broad data-src/background-image regexes pulled neighbour images
+        # in alongside (or instead of) the target post's image (DAN-65).
+        post_html = _truncate_at_related_content(html)
+        _dbg("fb_embed_scoped", before=len(html), after=len(post_html))
+
+        # Only trust narrow signals: og:image (canonical post image) and
+        # scaledImageFitWidth (FB's class for actual post photos in the embed).
         image_urls: list[str] = []
-
-        # Pattern 1: scaledImageFitWidth img tags
-        for match in re.finditer(
-            r'<img[^>]+class="[^"]*scaledImageFitWidth[^"]*"[^>]+src="([^"]+)"',
-            html,
-            re.IGNORECASE,
-        ):
-            image_urls.append(match.group(1).replace("&amp;", "&"))
-
-        # Pattern 2: data-src on img tags (lazy-loaded)
-        for match in re.finditer(
-            r'<img[^>]+data-src="([^"]+(?:scontent|fbcdn)[^"]+)"',
-            html,
-            re.IGNORECASE,
-        ):
-            image_urls.append(match.group(1).replace("&amp;", "&"))
-
-        # Pattern 3: og:image meta tags
         for match in re.finditer(
             r'<meta\s+[^>]*?property=["\']og:image["\'][^>]*?content=["\']([^"\']+)["\']',
-            html,
+            post_html,
             re.IGNORECASE,
         ):
             image_urls.append(match.group(1).replace("&amp;", "&"))
 
-        # Pattern 4: background-image URLs from Facebook CDN
         for match in re.finditer(
-            r"background-image:\s*url\(['\"]?(https?://[^)'\"]+"
-            r"(?:scontent|fbcdn)[^)'\"]+"
-            r")['\"]?\)",
-            html,
+            r'<img[^>]+class="[^"]*scaledImageFitWidth[^"]*"[^>]+src="([^"]+)"',
+            post_html,
             re.IGNORECASE,
         ):
             image_urls.append(match.group(1).replace("&amp;", "&"))
 
-        # Deduplicate
         seen: set[str] = set()
         unique_urls: list[str] = []
         for img_url in image_urls:
@@ -508,37 +576,41 @@ class FacebookScraper(BaseScraper):
         if not media_items:
             raise RuntimeError("Failed to download any images from Facebook embed page")
 
-        # Extract text from the embed page
-        # The embed page has post text in a <p> or <div> with specific classes
+        # Caption: prefer the rendered post body (._5pbx) over og:description
         caption = None
         text_match = re.search(
             r'<div[^>]+class="[^"]*_5pbx[^"]*"[^>]*>(.*?)</div>',
-            html,
+            post_html,
             re.DOTALL | re.IGNORECASE,
         )
         if text_match:
-            # Strip HTML tags from the text
             raw = re.sub(r"<[^>]+>", "", text_match.group(1)).strip()
             if raw:
                 caption = raw.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
 
-        # Fallback: og:description
         if not caption:
             desc_match = re.search(
                 r'<meta\s+[^>]*?property=["\']og:description["\'][^>]*?'
                 r'content=["\']([^"\']*)["\']',
-                html,
+                post_html,
                 re.IGNORECASE,
             )
             if desc_match and desc_match.group(1):
                 caption = desc_match.group(1).replace("&amp;", "&")
 
-        _dbg("fb_embed_success", images=len(media_items), has_caption=caption is not None)
+        author = _extract_author_from_html(post_html)
+
+        _dbg(
+            "fb_embed_success",
+            images=len(media_items),
+            has_caption=caption is not None,
+            has_author=author is not None,
+        )
 
         return ScrapedMedia(
             platform=self.platform,
             original_url=url,
-            author=None,
+            author=author,
             caption=caption,
             media_items=media_items,
         )
@@ -682,18 +754,8 @@ class FacebookScraper(BaseScraper):
 
         _dbg("fb_mbasic_html_received", length=len(html))
 
-        # mbasic pages have images in <img> tags with full-size URLs
-        # Look for images from Facebook's CDN
-        # Better regex (catches lazy-loaded images + srcset)
-        image_urls = re.findall(
-            r'(?:src|data-src|srcset)=["\']'
-            r"(.*?(?:scontent|external|fbcdn).*?(?:jpg|jpeg|png|webp))"
-            r'["\']',
-            html,
-            re.IGNORECASE,
-        )
-
-        # Also check for og:image in case mbasic serves it
+        # og:image lives in <head> and always points at the target post — pull it
+        # before truncating, since boundary markers can appear before </head>.
         og_images = re.findall(
             r'<meta\s+[^>]*?property=["\']og:image["\'][^>]*?content=["\']([^"\']+)["\']',
             html,
@@ -702,6 +764,22 @@ class FacebookScraper(BaseScraper):
         og_images += re.findall(
             r'<meta\s+[^>]*?content=["\']([^"\']+)["\'][^>]*?property=["\']og:image["\']',
             html,
+            re.IGNORECASE,
+        )
+
+        # Scope CDN-image regex to the post body. mbasic permalink pages render
+        # comments + 'More from this Page' / 'Related videos' below the post on
+        # the same CDN domain — broad regex over the whole document grabbed
+        # neighbour-post images and reposted them as if they were the target
+        # (DAN-65 user-reported wrong-image bug).
+        post_html = _truncate_at_related_content(html)
+        _dbg("fb_mbasic_scoped", before=len(html), after=len(post_html))
+
+        image_urls = re.findall(
+            r'(?:src|data-src|srcset)=["\']'
+            r"(.*?(?:scontent|external|fbcdn).*?(?:jpg|jpeg|png|webp))"
+            r'["\']',
+            post_html,
             re.IGNORECASE,
         )
 
@@ -733,12 +811,7 @@ class FacebookScraper(BaseScraper):
                 )
             raise RuntimeError("Could not find any images on Facebook mbasic page")
 
-        # Extract text content
-        title_match = re.search(
-            r'<meta\s+[^>]*?property=["\']og:title["\'][^>]*?content=["\']([^"\']*)["\']',
-            html,
-            re.IGNORECASE,
-        )
+        # Caption: prefer og:description (post body); og:title is usually the author name
         desc_match = re.search(
             r'<meta\s+[^>]*?property=["\']og:description["\'][^>]*?content=["\']([^"\']*)["\']',
             html,
@@ -771,16 +844,15 @@ class FacebookScraper(BaseScraper):
         if not media_items:
             raise RuntimeError("Failed to download any images from Facebook post")
 
-        caption = None
-        if title_match:
-            caption = title_match.group(1)
-        elif desc_match:
-            caption = desc_match.group(1)
+        caption = desc_match.group(1) if desc_match else None
+        author = _extract_author_from_html(html)
+
+        _dbg("fb_mbasic_success", images=len(media_items), has_author=author is not None)
 
         return ScrapedMedia(
             platform=self.platform,
             original_url=url,
-            author=None,
+            author=author,
             caption=caption,
             media_items=media_items,
         )
