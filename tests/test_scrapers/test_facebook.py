@@ -437,3 +437,90 @@ def test_extract_author_skips_invalid_jsonld():
     <meta property="og:title" content="Fallback Author">
     """
     assert _extract_author_from_html(html) == "Fallback Author"
+
+
+# ---------------------------------------------------------------------------
+# mbasic fallback guards (DAN-65: prod-extraction hardening)
+# ---------------------------------------------------------------------------
+
+
+def _make_text_response(text: str, final_url: str, status: int = 200):
+    """Mock an aiohttp text response with a configurable final url."""
+    resp = AsyncMock()
+    resp.raise_for_status = MagicMock()
+    resp.text = AsyncMock(return_value=text)
+    resp.url = final_url
+    resp.status = status
+    resp.__aenter__ = AsyncMock(return_value=resp)
+    resp.__aexit__ = AsyncMock(return_value=False)
+    return resp
+
+
+@pytest.mark.asyncio
+async def test_mbasic_bails_on_login_redirect():
+    """mbasic must fail loudly when FB redirects the page to /login.php."""
+    login_url = (
+        "https://mbasic.facebook.com/login.php?next=https://mbasic.facebook.com/foo/posts/abc"
+    )
+    mock_session = AsyncMock()
+    mock_session.get = MagicMock(
+        return_value=_make_text_response("<html>login form</html>", login_url)
+    )
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("aiohttp.ClientSession", return_value=mock_session):
+        scraper = FacebookScraper()
+        with pytest.raises(RuntimeError, match="redirected to login"):
+            await scraper._mbasic_fallback("https://www.facebook.com/foo/posts/abc")
+
+
+@pytest.mark.asyncio
+async def test_mbasic_bails_on_checkpoint_redirect():
+    """Same guard fires for FB's checkpoint (re-auth challenge) redirect."""
+    cp_url = "https://mbasic.facebook.com/checkpoint/?next=foo"
+    mock_session = AsyncMock()
+    mock_session.get = MagicMock(return_value=_make_text_response("<html></html>", cp_url))
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("aiohttp.ClientSession", return_value=mock_session):
+        scraper = FacebookScraper()
+        with pytest.raises(RuntimeError, match="checkpoint"):
+            await scraper._mbasic_fallback("https://www.facebook.com/foo/posts/abc")
+
+
+@pytest.mark.asyncio
+async def test_mbasic_filters_out_static_xx_ui_assets():
+    """static.xx.fbcdn.net URLs (FB chrome) are excluded before download attempts."""
+    html = (
+        '<meta property="og:image" '
+        'content="https://scontent.fbcdn.net/v/post-photo.jpg">'
+        '<img src="https://static.xx.fbcdn.net/rsrc.php/y8/r/icon.webp">'
+        '<img src="https://static.xx.fbcdn.net/rsrc.php/yl/r/sprite.webp">'
+    )
+    final_url = "https://mbasic.facebook.com/foo/posts/abc"
+
+    page_resp = _make_text_response(html, final_url)
+    image_resp = _make_bytes_response(b"x" * 10_000)
+
+    call_count = {"n": 0}
+
+    def get_router(*args, **kwargs):
+        call_count["n"] += 1
+        # First call is the page fetch, subsequent are image downloads
+        return page_resp if call_count["n"] == 1 else image_resp
+
+    mock_session = AsyncMock()
+    mock_session.get = MagicMock(side_effect=get_router)
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("aiohttp.ClientSession", return_value=mock_session):
+        scraper = FacebookScraper()
+        result = await scraper._mbasic_fallback("https://www.facebook.com/foo/posts/abc")
+
+    # Only the scontent post image survives — static.xx UI assets were skipped
+    assert len(result.media_items) == 1
+    assert "scontent.fbcdn.net" in result.media_items[0].url
+    assert all("static.xx.fbcdn.net" not in item.url for item in result.media_items)

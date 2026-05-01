@@ -30,7 +30,11 @@ _BROWSER_HEADERS: dict[str, str] = {
         "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
     ),
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
+    # Brotli intentionally omitted — aiohttp can't decode 'br' without the Brotli
+    # package installed, and FB serves brotli when 'br' is advertised, which
+    # killed the og:image phase with 'Can not decode content-encoding: brotli'.
+    # gzip is plenty for HTML.
+    "Accept-Encoding": "gzip, deflate",
     "sec-ch-ua": '"Chromium";v="131", "Not_A Brand";v="24"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"Windows"',
@@ -752,6 +756,13 @@ class FacebookScraper(BaseScraper):
                 resp.raise_for_status()
                 html = await resp.text()
 
+        # mbasic happily 200s a login page when cookies are missing/stale, then
+        # the only "images" we find are static.xx.fbcdn.net UI sprites — that
+        # bubbles up as the misleading "Failed to download any images" error.
+        # Bail explicitly so the failure is diagnosable.
+        if "/login" in final_url or "checkpoint" in final_url:
+            raise RuntimeError(f"mbasic redirected to login/checkpoint: {final_url}")
+
         _dbg("fb_mbasic_html_received", length=len(html))
 
         # og:image lives in <head> and always points at the target post — pull it
@@ -796,6 +807,11 @@ class FacebookScraper(BaseScraper):
         for img_url in all_urls:
             # Unescape HTML entities
             img_url = img_url.replace("&amp;", "&")
+            # static.xx.fbcdn.net serves FB's chrome (icons, sprites, JS shards)
+            # — never post media. Filtering here avoids burning the per-URL
+            # download budget on guaranteed-too-small responses.
+            if "static.xx.fbcdn.net" in img_url:
+                continue
             if img_url not in seen:
                 seen.add(img_url)
                 unique_urls.append(img_url)
