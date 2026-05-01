@@ -58,6 +58,59 @@ class TestDetectLinks:
         assert len(links) == 1
         assert links[0].platform == Platform.FACEBOOK
 
+    def test_facebook_watch_url(self):
+        links = detect_links("https://www.facebook.com/watch?v=987654321")
+        assert len(links) == 1
+        assert links[0].platform == Platform.FACEBOOK
+
+    def test_facebook_reel_url(self):
+        links = detect_links("https://www.facebook.com/reel/123456")
+        assert len(links) == 1
+        assert links[0].platform == Platform.FACEBOOK
+
+    def test_facebook_share_post_url(self):
+        links = detect_links("https://www.facebook.com/share/p/abc123XYZ/")
+        assert len(links) == 1
+        assert links[0].platform == Platform.FACEBOOK
+
+    def test_facebook_share_video_url(self):
+        links = detect_links("https://www.facebook.com/share/v/abc123XYZ/")
+        assert len(links) == 1
+        assert links[0].platform == Platform.FACEBOOK
+
+    def test_facebook_photo_permalink(self):
+        links = detect_links("https://www.facebook.com/photo/?fbid=123&set=a.456")
+        assert len(links) == 1
+        assert links[0].platform == Platform.FACEBOOK
+
+    def test_facebook_groups_excluded(self):
+        """Group post URLs must not be picked up as supported links."""
+        links = detect_links("https://www.facebook.com/groups/12345/posts/67890")
+        assert links == []
+
+    def test_facebook_marketplace_excluded(self):
+        """Marketplace listing URLs must not be picked up."""
+        links = detect_links("https://www.facebook.com/marketplace/item/12345/")
+        assert links == []
+
+    def test_facebook_share_group_excluded(self):
+        """share/g (group) shortlinks must not be picked up."""
+        links = detect_links("https://www.facebook.com/share/g/abc123/")
+        assert links == []
+
+    def test_facebook_profile_page_excluded(self):
+        """Bare profile URLs (no /posts/, /videos/, etc.) must not be picked up."""
+        links = detect_links("https://www.facebook.com/zuck")
+        assert links == []
+
+    def test_facebook_events_excluded(self):
+        links = detect_links("https://www.facebook.com/events/12345/")
+        assert links == []
+
+    def test_facebook_login_excluded(self):
+        links = detect_links("https://www.facebook.com/login/")
+        assert links == []
+
     def test_github_commit(self):
         links = detect_links("https://github.com/owner/repo/commit/abc123def456")
         assert len(links) == 1
