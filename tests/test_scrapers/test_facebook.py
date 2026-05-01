@@ -6,7 +6,9 @@ from src.scrapers.base import MediaItem, MediaType, ScrapedMedia
 from src.scrapers.facebook import (
     FacebookScraper,
     _clean_facebook_url,
+    _extract_author_from_html,
     _read_cookies_for_domain,
+    _truncate_at_related_content,
 )
 from src.utils.link_detector import Platform
 from src.utils.ytdlp import YtdlpResult
@@ -337,3 +339,101 @@ async def test_resolve_share_link_passthrough():
     scraper = FacebookScraper()
     result = await scraper._resolve_share_link("https://www.facebook.com/user/posts/123")
     assert result == "https://www.facebook.com/user/posts/123"
+
+
+# ---------------------------------------------------------------------------
+# Related-content boundary truncation (regression: wrong-image bug)
+# ---------------------------------------------------------------------------
+
+
+def test_truncate_at_related_content_drops_more_from_page():
+    """HTML is cut at 'More from this Page' so neighbour images aren't scanned."""
+    html = (
+        "<head><meta property='og:image' content='https://scontent.fbcdn.net/post.jpg'></head>"
+        "<body><div>Post body</div>"
+        "<h2>More from this Page</h2>"
+        "<img src='https://scontent.fbcdn.net/related1.jpg'>"
+        "<img src='https://scontent.fbcdn.net/related2.jpg'>"
+        "</body>"
+    )
+    truncated = _truncate_at_related_content(html)
+    assert "post.jpg" in truncated
+    assert "related1.jpg" not in truncated
+    assert "related2.jpg" not in truncated
+
+
+def test_truncate_at_related_content_drops_suggestions():
+    """'Suggested for You' boundary cuts the doc."""
+    html = (
+        "<div>main post <img src='real.jpg'></div>"
+        "<div>Suggested for You</div>"
+        "<img src='suggested.jpg'>"
+    )
+    truncated = _truncate_at_related_content(html)
+    assert "real.jpg" in truncated
+    assert "suggested.jpg" not in truncated
+
+
+def test_truncate_at_related_content_no_boundary_keeps_html():
+    """Without a boundary marker, the full HTML is returned."""
+    html = "<div>only the post here, nothing else</div>"
+    assert _truncate_at_related_content(html) == html
+
+
+# ---------------------------------------------------------------------------
+# Author extraction
+# ---------------------------------------------------------------------------
+
+
+def test_extract_author_from_jsonld():
+    """JSON-LD author.name is preferred when present."""
+    html = """
+    <html><head>
+    <script type="application/ld+json">
+    {"@type": "SocialMediaPosting", "author": {"@type": "Person", "name": "Jane Doe"}}
+    </script>
+    </head></html>
+    """
+    assert _extract_author_from_html(html) == "Jane Doe"
+
+
+def test_extract_author_from_mbasic_header():
+    """mbasic <h3><strong><a> structure yields the author name."""
+    html = (
+        '<div id="m_story_permalink_view">'
+        '<h3><strong><a href="/zuck">Mark Zuckerberg</a></strong></h3>'
+        "<div>post body</div></div>"
+    )
+    assert _extract_author_from_html(html) == "Mark Zuckerberg"
+
+
+def test_extract_author_from_og_title():
+    """og:title is the last-resort source; trailing ' | Facebook' is stripped."""
+    html = '<meta property="og:title" content="Cool Page | Facebook">'
+    assert _extract_author_from_html(html) == "Cool Page"
+
+
+def test_extract_author_jsonld_takes_precedence_over_og_title():
+    """JSON-LD wins over og:title when both are present."""
+    html = """
+    <meta property="og:title" content="Wrong Author | Facebook">
+    <script type="application/ld+json">
+    {"author": {"name": "Right Author"}}
+    </script>
+    """
+    assert _extract_author_from_html(html) == "Right Author"
+
+
+def test_extract_author_returns_none_when_absent():
+    """No usable author markers → None."""
+    html = "<html><body>just text, no author markers</body></html>"
+    assert _extract_author_from_html(html) is None
+
+
+def test_extract_author_skips_invalid_jsonld():
+    """Malformed JSON-LD doesn't crash; falls through to og:title."""
+    html = """
+    <script type="application/ld+json">{this is not valid json</script>
+    <meta property="og:title" content="Fallback Author">
+    """
+    assert _extract_author_from_html(html) == "Fallback Author"

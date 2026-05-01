@@ -55,9 +55,28 @@ _PLATFORM_PATTERNS: list[tuple[Platform, re.Pattern[str]]] = [
         ),
     ),
     (
+        # Facebook post-shaped URLs only — explicitly excludes /groups/, /marketplace/,
+        # /events/, /messages/, profile pages, and group/marketplace share links
+        # (share/g, share/m). Public posts, watch, reels, photo permalinks, and
+        # share/{p,v,r} shortlinks are accepted.
         Platform.FACEBOOK,
         re.compile(
-            r"https?://(?:www\.|m\.)?facebook\.com/\S+",
+            r"https?://(?:www\.|m\.|web\.)?facebook\.com/"
+            r"(?!groups/|marketplace/|messages/|events/|notifications/|"
+            r"help/|policies/|privacy/|settings/|login|recover/|signup)"
+            r"(?:"
+            r"photo(?:\.php)?(?:/[\w.\-]+)?/?(?:\?\S*)?"
+            r"|watch/?(?:\?\S*)?"
+            r"|reel/[\w\-]+"
+            r"|share/(?:p|v|r)/[\w\-]+/?"
+            r"|permalink\.php\?\S+"
+            r"|story\.php\?\S+"
+            r"|video\.php\?\S+"
+            r"|[\w.\-]+/posts/[\w\-]+"
+            r"|[\w.\-]+/videos/[\w\-]+"
+            r"|[\w.\-]+/photos/[\w./\-]+"
+            r"|[\w.\-]+/reels/[\w\-]+"
+            r")",
             re.IGNORECASE,
         ),
     ),
