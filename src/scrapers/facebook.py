@@ -132,6 +132,39 @@ def _extract_author_from_html(html: str) -> str | None:
     return None
 
 
+def _username_from_post_url(url: str) -> str | None:
+    """Extract the page/user slug from /{slug}/{posts|videos|photos|reels}/...
+
+    The slug identifies the FB page that owns the post — used to validate that
+    yt-dlp's returned video actually belongs to the requested post (rather than
+    a sponsored/featured/'watch next' embed on the same page, which yt-dlp's FB
+    extractor happily latches onto).
+    """
+    m = re.search(
+        r"facebook\.com/([\w.\-]+)/(?:posts|videos|photos|reels)/",
+        url,
+        re.IGNORECASE,
+    )
+    return m.group(1) if m else None
+
+
+def _uploader_matches_url(uploader: str | None, url: str) -> bool:
+    """True when yt-dlp's uploader plausibly matches the URL's page slug.
+
+    Conservative: returns True when there's no slug or no uploader, so we don't
+    falsely reject /watch /reel /share/v /share/r URLs that don't carry a slug.
+    Only fires when there IS a slug AND a clearly-different uploader. Comparison
+    strips spaces, dots, dashes, and underscores to absorb common stylings
+    (e.g. slug 'tec.mundo' vs uploader 'TecMundo').
+    """
+    slug = _username_from_post_url(url)
+    if not slug or not uploader:
+        return True
+    norm_slug = re.sub(r"[\s.\-_]", "", slug).lower()
+    norm_uploader = re.sub(r"[\s.\-_]", "", uploader).lower()
+    return norm_slug in norm_uploader or norm_uploader in norm_slug
+
+
 def _dbg(event: str, **kwargs: object) -> None:
     """Log at info level when debug_mode is on, otherwise debug."""
     if settings.debug_mode:
@@ -194,8 +227,25 @@ class FacebookScraper(BaseScraper):
         try:
             _dbg("fb_phase1_ytdlp", url=url)
             result = await ytdlp_download(url, cookies_file=settings.cookies_file)
-            if result.data:
-                _dbg("fb_phase1_ytdlp_ok", size=len(result.data), is_video=result.is_video)
+            if result.data and not _uploader_matches_url(result.uploader, url):
+                # yt-dlp's FB extractor walks the post page DOM and returns the
+                # first <video> element it finds, which on busy page posts is
+                # often a sponsored / 'watch next' / pinned video belonging to
+                # a *different* page (DAN-66: tecmundo post returned a Clube de
+                # Literatura Clássica book-club video). Reject and fall through.
+                _dbg(
+                    "fb_phase1_ytdlp_uploader_mismatch",
+                    url=url,
+                    slug=_username_from_post_url(url),
+                    uploader=result.uploader,
+                )
+            elif result.data:
+                _dbg(
+                    "fb_phase1_ytdlp_ok",
+                    size=len(result.data),
+                    is_video=result.is_video,
+                    uploader=result.uploader,
+                )
                 if result.is_animation:
                     media_type = MediaType.ANIMATION
                 elif result.is_video:
@@ -211,7 +261,8 @@ class FacebookScraper(BaseScraper):
                     caption=result.description or result.title,
                     media_items=[item],
                 )
-            _dbg("fb_phase1_ytdlp_no_data", url=url)
+            else:
+                _dbg("fb_phase1_ytdlp_no_data", url=url)
         except RuntimeError as exc:
             _dbg("fb_phase1_ytdlp_failed", url=url, error=str(exc))
 
