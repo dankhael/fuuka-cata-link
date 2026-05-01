@@ -9,6 +9,8 @@ from src.scrapers.facebook import (
     _extract_author_from_html,
     _read_cookies_for_domain,
     _truncate_at_related_content,
+    _uploader_matches_url,
+    _username_from_post_url,
 )
 from src.utils.link_detector import Platform
 from src.utils.ytdlp import YtdlpResult
@@ -524,3 +526,136 @@ async def test_mbasic_filters_out_static_xx_ui_assets():
     assert len(result.media_items) == 1
     assert "scontent.fbcdn.net" in result.media_items[0].url
     assert all("static.xx.fbcdn.net" not in item.url for item in result.media_items)
+
+
+# ---------------------------------------------------------------------------
+# yt-dlp uploader validation (DAN-66: wrong-video bug)
+# ---------------------------------------------------------------------------
+
+
+def test_username_from_post_url_extracts_slug():
+    assert _username_from_post_url("https://www.facebook.com/tecmundo/posts/pfbid123") == "tecmundo"
+    assert _username_from_post_url("https://www.facebook.com/tec.mundo/videos/123") == "tec.mundo"
+    assert _username_from_post_url("https://www.facebook.com/some-page/photos/a.1/2") == "some-page"
+    assert _username_from_post_url("https://www.facebook.com/page_name/reels/abc") == "page_name"
+
+
+def test_username_from_post_url_returns_none_for_slugless_urls():
+    """URLs without a {slug}/{posts|videos|photos|reels}/ shape return None."""
+    assert _username_from_post_url("https://www.facebook.com/watch?v=123") is None
+    assert _username_from_post_url("https://www.facebook.com/reel/abc") is None
+    assert _username_from_post_url("https://www.facebook.com/share/p/xyz") is None
+    assert _username_from_post_url("https://www.facebook.com/share/v/xyz") is None
+    assert _username_from_post_url("https://www.facebook.com/photo/?fbid=1") is None
+
+
+def test_uploader_matches_url_exact_slug():
+    """Identical slug and uploader → match."""
+    url = "https://www.facebook.com/tecmundo/posts/pfbid123"
+    assert _uploader_matches_url("tecmundo", url) is True
+
+
+def test_uploader_matches_url_case_and_style_insensitive():
+    """Stylings (case, dots, dashes, spaces) shouldn't break the match."""
+    url = "https://www.facebook.com/tecmundo/posts/pfbid123"
+    assert _uploader_matches_url("TecMundo", url) is True
+    assert _uploader_matches_url("Tec.Mundo", url) is True
+    assert _uploader_matches_url("Tec Mundo", url) is True
+    assert _uploader_matches_url("Tec-Mundo", url) is True
+
+
+def test_uploader_matches_url_substring_either_direction():
+    """Slug ⊂ uploader OR uploader ⊂ slug both count as a match."""
+    url = "https://www.facebook.com/tec/posts/pfbid123"
+    assert _uploader_matches_url("TecMundo Brasil", url) is True  # slug in uploader
+    url2 = "https://www.facebook.com/tecmundobrasil/posts/pfbid123"
+    assert _uploader_matches_url("TecMundo", url2) is True  # uploader in slug
+
+
+def test_uploader_matches_url_clear_mismatch():
+    """The DAN-66 case: tecmundo URL, Clube de Literatura uploader → mismatch."""
+    url = "https://www.facebook.com/tecmundo/posts/pfbid123"
+    assert _uploader_matches_url("Clube de Literatura Clássica", url) is False
+    assert _uploader_matches_url("Hero Wars: Dominion Era", url) is False
+
+
+def test_uploader_matches_url_conservative_when_no_signal():
+    """No slug → trust yt-dlp (e.g. /watch /reel)."""
+    assert _uploader_matches_url("Anyone", "https://www.facebook.com/watch?v=1") is True
+    assert _uploader_matches_url("Anyone", "https://www.facebook.com/reel/abc") is True
+    """No uploader → trust yt-dlp (no signal to reject on)."""
+    assert _uploader_matches_url(None, "https://www.facebook.com/x/posts/y") is True
+    assert _uploader_matches_url("", "https://www.facebook.com/x/posts/y") is True
+
+
+@pytest.mark.asyncio
+async def test_ytdlp_falls_through_on_uploader_mismatch():
+    """The wrong-video regression: yt-dlp returns content with a clearly wrong
+    uploader → primary chain must NOT short-circuit on it; must fall through."""
+    wrong_video = YtdlpResult(
+        title="A book club's recent post",
+        description="not the requested post",
+        uploader="Clube de Literatura Clássica",
+        data=b"wrong_video_bytes",
+        is_video=True,
+    )
+    # The next phase that succeeds — confirms we got past yt-dlp
+    correct_result = ScrapedMedia(
+        platform=Platform.FACEBOOK,
+        original_url="https://www.facebook.com/tecmundo/posts/pfbid123",
+        author="TecMundo",
+        caption="Maio chegou...",
+        media_items=[
+            MediaItem(
+                url="https://scontent.fbcdn.net/post.jpg",
+                media_type=MediaType.IMAGE,
+                data=b"correct_image",
+            ),
+        ],
+    )
+
+    with (
+        patch(
+            "src.scrapers.facebook.ytdlp_download",
+            new_callable=AsyncMock,
+            return_value=wrong_video,
+        ),
+        _FDOWN_FAIL,
+        _FBSCRAPER_FAIL,
+        patch(
+            "src.scrapers.facebook.FacebookScraper._opengraph_fallback",
+            new_callable=AsyncMock,
+            return_value=correct_result,
+        ),
+    ):
+        scraper = FacebookScraper()
+        result = await scraper._primary_extract("https://www.facebook.com/tecmundo/posts/pfbid123")
+
+    # Must NOT be the wrong yt-dlp video
+    assert result.author == "TecMundo"
+    assert result.caption == "Maio chegou..."
+    assert result.media_items[0].data == b"correct_image"
+    assert result.media_items[0].media_type == MediaType.IMAGE
+
+
+@pytest.mark.asyncio
+async def test_ytdlp_passes_through_on_uploader_match():
+    """Sanity: matching uploader still returns the yt-dlp result (no regression)."""
+    matching = YtdlpResult(
+        title="Maio chegou",
+        description="post body",
+        uploader="TecMundo",
+        data=b"correct_video",
+        is_video=True,
+    )
+
+    with patch(
+        "src.scrapers.facebook.ytdlp_download",
+        new_callable=AsyncMock,
+        return_value=matching,
+    ):
+        scraper = FacebookScraper()
+        result = await scraper._primary_extract("https://www.facebook.com/tecmundo/posts/pfbid123")
+
+    assert result.author == "TecMundo"
+    assert result.media_items[0].data == b"correct_video"
