@@ -12,7 +12,7 @@ from aiogram.enums import ParseMode
 
 from src.bot.handlers import router, setup_scrapers
 from src.bot.middlewares import LoggingMiddleware, RateLimitMiddleware
-from src.config import settings
+from src.config import env_diagnostics, settings
 from src.utils.diagnostics import error_diagnostics_processor, performance_processor
 
 
@@ -44,7 +44,16 @@ async def main() -> None:
     configure_logging()
     log = structlog.get_logger()
 
-    log.info("starting_bot", log_level=settings.log_level)
+    diag = env_diagnostics()
+    log.info("starting_bot", log_level=settings.log_level, **diag)
+    if diag["os_env_overrides_file"]:
+        log.warning(
+            "os_env_overriding_env_file",
+            env_file=diag["env_file"],
+            hint="TELEGRAM_BOT_TOKEN is set in the OS environment and shadows the .env file. "
+            "Unset it (e.g. `unset TELEGRAM_BOT_TOKEN` / `Remove-Item Env:TELEGRAM_BOT_TOKEN`) "
+            "or run with `env -i ENV_FILE=... python -m src.main`.",
+        )
 
     setup_scrapers()
 
@@ -61,7 +70,8 @@ async def main() -> None:
     # Register routers
     dp.include_router(router)
 
-    log.info("bot_ready", bot_id=(await bot.get_me()).id)
+    me = await bot.get_me()
+    log.info("bot_ready", bot_id=me.id, bot_username=me.username)
 
     try:
         await dp.start_polling(bot)
