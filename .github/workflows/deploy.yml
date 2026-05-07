@@ -63,6 +63,13 @@ jobs:
             git fetch --all --prune
             git reset --hard origin/master
 
+            # docker-compose.yml ships with the cookies mount commented out so
+            # local checkouts don't fail when cookies.txt is absent. On the VPS
+            # the file exists, so enable the mount in the working tree (git
+            # reset wipes this each deploy, so the sed must re-run every time).
+            echo ">>> Enabling cookies mount in docker-compose.yml"
+            sed -i 's|# - \./cookies\.txt:/app/cookies\.txt:ro|- ./cookies.txt:/app/cookies.txt:ro|' docker-compose.yml
+
             echo ">>> Rebuilding and restarting bot (replaces previous version)"
             docker compose up -d --build --remove-orphans
 
@@ -71,3 +78,55 @@ jobs:
 
             echo ">>> Container status"
             docker compose ps
+
+  mark-linear-done:
+    name: Mark Linear issue Done
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Transition referenced DAN-* issues to Done
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LINEAR_API_KEY:-}" ]; then
+            echo "LINEAR_API_KEY not set; skipping"
+            exit 0
+          fi
+
+          msg=$(git log -1 --pretty=%B)
+          ids=$(printf '%s' "$msg" | grep -oE 'DAN-[0-9]+' | sort -u || true)
+          if [ -z "$ids" ]; then
+            echo "No DAN-* references in latest commit; nothing to do"
+            exit 0
+          fi
+
+          for id in $ids; do
+            echo ">>> $id"
+            issue_resp=$(curl -sS -X POST https://api.linear.app/graphql \
+              -H "Authorization: $LINEAR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d "{\"query\":\"query(\$id:String!){issue(id:\$id){id team{states{nodes{id type}}}}}\",\"variables\":{\"id\":\"$id\"}}")
+
+            issue_uuid=$(printf '%s' "$issue_resp" | jq -r '.data.issue.id // empty')
+            done_state=$(printf '%s' "$issue_resp" | jq -r '.data.issue.team.states.nodes[] | select(.type=="completed") | .id' | head -n1)
+
+            if [ -z "$issue_uuid" ] || [ -z "$done_state" ]; then
+              echo "  could not resolve issue or Done state; response: $issue_resp"
+              continue
+            fi
+
+            curl -sS -X POST https://api.linear.app/graphql \
+              -H "Authorization: $LINEAR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d "{\"query\":\"mutation(\$id:String!,\$state:String!){issueUpdate(id:\$id,input:{stateId:\$state}){success}}\",\"variables\":{\"id\":\"$issue_uuid\",\"state\":\"$done_state\"}}" \
+              | jq -e '.data.issueUpdate.success' >/dev/null
+            echo "  transitioned to Done"
+          done
