@@ -18,7 +18,7 @@ from aiogram.types import (
 
 from src.bot.filters import AllowedChat, ContainsSupportedLink
 from src.config import settings
-from src.scrapers.base import MediaType, ScrapedMedia
+from src.scrapers.base import MediaType, ScrapedMedia, SkipExtraction
 from src.utils.formatters import format_caption, format_text_post, truncate
 from src.utils.link_detector import DetectedLink, Platform
 from src.utils.media_handler import download_media, ensure_within_limit
@@ -70,6 +70,14 @@ async def _process_links(
 
         try:
             result = await scraper.extract(link.url)
+        except SkipExtraction as exc:
+            logger.info(
+                "extraction_skipped",
+                platform=link.platform,
+                url=link.url,
+                reason=str(exc),
+            )
+            continue
         except Exception as exc:
             logger.error(
                 "scraper_error",

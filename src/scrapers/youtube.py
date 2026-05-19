@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from src.config import settings
-from src.scrapers.base import BaseScraper, MediaItem, MediaType, ScrapedMedia
+from src.scrapers.base import BaseScraper, MediaItem, MediaType, ScrapedMedia, SkipExtraction
 from src.utils.link_detector import Platform
 from src.utils.ytdlp import ytdlp_download
+
+_MAX_YOUTUBE_DURATION_SECONDS = 318
 
 
 class YouTubeScraper(BaseScraper):
@@ -18,14 +20,12 @@ class YouTubeScraper(BaseScraper):
     async def _ytdlp_extract(self, url: str) -> ScrapedMedia:
         result = await ytdlp_download(url, cookies_file=settings.cookies_file)
 
-        # Reject videos longer than 5 minutes 18 seconds
-        if result.duration and result.duration > 318:
-            minutes = int(result.duration // 60)
-            seconds = int(result.duration % 60)
-            return ScrapedMedia(
-                platform=self.platform,
-                original_url=url,
-                caption=f"Video too long: {minutes}:{seconds:02d} (max 5:18)",
+        # Silently drop videos over the cap (DAN-71): replying with an error
+        # message just spammed chats whenever someone shared a long video.
+        if result.duration and result.duration > _MAX_YOUTUBE_DURATION_SECONDS:
+            raise SkipExtraction(
+                f"youtube duration {result.duration:.0f}s exceeds cap "
+                f"{_MAX_YOUTUBE_DURATION_SECONDS}s for {url!r}"
             )
 
         if not result.data:
