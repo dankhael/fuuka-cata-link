@@ -24,6 +24,20 @@ The bot watches for social media links in group messages. When it detects one, i
 
 Extracted media is sent back as a reply with a caption containing the author and a link to the original post. If a link is sent as a spoiler, the media is also sent with spoiler protection.
 
+## Commands
+
+Commands are sent inline alongside the link (e.g. `/translate https://x.com/...`) and can be combined in any order.
+
+| Command | Effect |
+|---|---|
+| `/help` | Show the in-chat help message |
+| `/ignore` | Post the link without expansion |
+| `/noreply` | Expand the link but drop the quoted/replied-to post |
+| `/nocaption` | Send only the media, no caption |
+| `/translate` | Translate the tweet caption to Brazilian Portuguese (Twitter/X only) |
+
+`/translate` uses a pluggable LLM backend (Anthropic Claude or OpenAI GPT). Tweets already in Portuguese are skipped to avoid wasted API calls, and quote/reply parent tweets are translated independently. Configure via the `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `TRANSLATION_PROVIDER` / `TRANSLATION_MODEL` env vars below.
+
 ## Setup
 
 ### Prerequisites
@@ -52,6 +66,12 @@ Optional:
 - `DOWNLOAD_TIMEOUT_SECONDS` — download timeout (default: 30)
 - `CONCURRENT_DOWNLOADS` — max parallel downloads (default: 3)
 - `LOG_LEVEL` — logging level (default: INFO)
+
+For the `/translate` command:
+- `ANTHROPIC_API_KEY` — Claude API key (default model: `claude-haiku-4-5`)
+- `OPENAI_API_KEY` — OpenAI API key (default model: `gpt-4o-mini`)
+- `TRANSLATION_PROVIDER` — `anthropic` or `openai` to force a provider. If unset, auto-detects from whichever key is present (Anthropic wins ties)
+- `TRANSLATION_MODEL` — override the provider's default model (e.g. `claude-opus-4-7`, `gpt-4o`)
 
 ### Local Installation
 
@@ -223,6 +243,7 @@ src/
     media_handler.py  # Concurrent downloads, image optimization
     formatters.py     # Caption/text formatting
     ytdlp.py          # yt-dlp wrapper
+    translator.py     # /translate backend (Anthropic / OpenAI)
   config.py           # pydantic-settings config
   main.py             # Entry point
 ```

@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     reddit_client_id: str | None = None
     reddit_client_secret: str | None = None
 
+    # /translate backend selection. Provider auto-detects from whichever key is
+    # set (anthropic first, then openai); set translation_provider to force a
+    # choice when both keys are present. translation_model overrides the
+    # provider default (claude-haiku-4-5 / gpt-4o-mini).
+    anthropic_api_key: str | None = None
+    openai_api_key: str | None = None
+    translation_provider: str | None = None  # "anthropic" | "openai" | None
+    translation_model: str | None = None
+
     # Cookies file for authenticated scraping (Facebook, Instagram, YouTube)
     cookies_file: str | None = None
     cookies_from_browser: str | None = None  # e.g. "chrome", "firefox", "edge"

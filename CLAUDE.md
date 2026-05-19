@@ -76,6 +76,7 @@ Message → LoggingMiddleware → RateLimitMiddleware
 - **Pre-downloaded data**: Some scrapers populate `MediaItem.data` with bytes directly; others return URLs for `media_handler` to download later
 - **All I/O is async**: Uses `aiohttp` for HTTP, `aiogram` for Telegram, semaphore-throttled concurrent downloads
 - **Structured logging**: `structlog` with JSON output in production, console in dev; contextual fields (platform, url, duration_ms, method)
+- **Update Help Command**: In case of new commands, update help command message with them and their functionality
 
 ### Testing Patterns
 
