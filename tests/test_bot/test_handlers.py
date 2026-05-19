@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 from src.bot import handlers
-from src.scrapers.base import MediaItem, MediaType, ScrapedMedia
+from src.scrapers.base import MediaItem, MediaType, ScrapedMedia, SkipExtraction
 from src.utils.link_detector import DetectedLink, Platform
 
 
@@ -307,3 +307,26 @@ async def test_translate_skipped_when_nocaption_active():
         await handlers._process_links(message, [_link()], strip_caption=True, translate=True)
 
     fake_translate.assert_not_awaited()
+
+
+async def test_skip_extraction_results_in_no_reply():
+    """When a scraper raises ``SkipExtraction`` (e.g. YouTube video over the
+    duration cap), the handler must stay completely silent — no reply, no
+    error message, no send."""
+    scraper = AsyncMock()
+    scraper.extract.side_effect = SkipExtraction("video too long")
+    message = AsyncMock()
+    send = AsyncMock()
+
+    yt_link = DetectedLink(
+        url="https://youtu.be/abc", platform=Platform.YOUTUBE, is_spoiler=False
+    )
+    with (
+        patch.dict(handlers._SCRAPER_MAP, {Platform.YOUTUBE: scraper}, clear=True),
+        patch.object(handlers, "_send_result", send),
+    ):
+        await handlers._process_links(message, [yt_link])
+
+    send.assert_not_awaited()
+    message.reply.assert_not_awaited()
+    message.answer.assert_not_awaited()

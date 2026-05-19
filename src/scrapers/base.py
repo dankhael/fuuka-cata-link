@@ -12,6 +12,16 @@ from src.utils.link_detector import Platform
 logger = structlog.get_logger()
 
 
+class SkipExtraction(Exception):
+    """Signal that a link should be ignored entirely (no reply, no fallback).
+
+    Raised by a scraper when the linked content is structurally unsupported
+    (e.g. YouTube video over the duration cap) and should NOT trigger an
+    error message back to the chat. ``BaseScraper.extract`` re-raises this
+    instead of trying the next fallback method.
+    """
+
+
 class MediaType(StrEnum):
     IMAGE = "image"
     VIDEO = "video"
@@ -82,6 +92,8 @@ class BaseScraper(ABC):
                     media_count=len(result.media_items),
                 )
                 return result
+            except SkipExtraction:
+                raise
             except Exception as exc:
                 duration_ms = int((time.monotonic() - start) * 1000)
                 logger.warning(

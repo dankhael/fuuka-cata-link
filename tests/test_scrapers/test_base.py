@@ -1,6 +1,6 @@
 import pytest
 
-from src.scrapers.base import BaseScraper, MediaItem, MediaType, ScrapedMedia
+from src.scrapers.base import BaseScraper, MediaItem, MediaType, ScrapedMedia, SkipExtraction
 from src.utils.link_detector import Platform
 
 
@@ -80,6 +80,31 @@ async def test_has_media_property():
     )
     assert with_media.has_media is True
     assert without_media.has_media is False
+
+
+@pytest.mark.asyncio
+async def test_skip_extraction_bypasses_fallbacks():
+    """``SkipExtraction`` must propagate out of ``extract`` instead of being
+    swallowed as a failed method and triggering the next fallback."""
+    ytdlp_called = False
+
+    class SkippingScraper(BaseScraper):
+        @property
+        def platform(self) -> Platform:
+            return Platform.YOUTUBE
+
+        async def _primary_extract(self, url: str) -> ScrapedMedia:
+            raise SkipExtraction("over the cap")
+
+        async def _ytdlp_extract(self, url: str) -> ScrapedMedia:
+            nonlocal ytdlp_called
+            ytdlp_called = True
+            return ScrapedMedia(platform=self.platform, original_url=url)
+
+    scraper = SkippingScraper()
+    with pytest.raises(SkipExtraction):
+        await scraper.extract("https://youtu.be/x")
+    assert ytdlp_called is False
 
 
 @pytest.mark.asyncio
