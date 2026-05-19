@@ -41,6 +41,7 @@ class ScrapedMedia:
     method_used: str = "unknown"
     referenced_post: ScrapedMedia | None = None
     reference_type: str | None = None  # "reply" | "quote"
+    lang: str | None = None  # ISO 639-1; populated by scrapers that expose it (e.g. fxtwitter)
 
     @property
     def has_media(self) -> bool:

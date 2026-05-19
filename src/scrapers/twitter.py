@@ -135,6 +135,7 @@ class TwitterScraper(BaseScraper):
             author=author,
             caption=tweet_data.get("text"),
             media_items=media_items,
+            lang=tweet_data.get("lang"),
         )
 
     @staticmethod

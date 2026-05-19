@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 
@@ -19,8 +20,9 @@ from src.bot.filters import AllowedChat, ContainsSupportedLink
 from src.config import settings
 from src.scrapers.base import MediaType, ScrapedMedia
 from src.utils.formatters import format_caption, format_text_post, truncate
-from src.utils.link_detector import DetectedLink
+from src.utils.link_detector import DetectedLink, Platform
 from src.utils.media_handler import download_media, ensure_within_limit
+from src.utils.translator import translate_to_portuguese
 
 logger = structlog.get_logger()
 
@@ -46,6 +48,7 @@ async def _process_links(
     *,
     strip_referenced: bool = False,
     strip_caption: bool = False,
+    translate: bool = False,
 ) -> None:
     """Scrape each detected link and send results.
 
@@ -55,6 +58,9 @@ async def _process_links(
     When *strip_caption* is True, the post's caption text is dropped before
     sending (media-only mode). Text-only posts are skipped silently in this
     mode since there is no media to send.
+
+    When *translate* is True, tweet captions are translated to Portuguese
+    (skipped for non-Twitter links and for tweets already in Portuguese).
     """
     for link in detected_links:
         scraper = _SCRAPER_MAP.get(link.platform)
@@ -86,7 +92,30 @@ async def _process_links(
             if result.referenced_post is not None:
                 result.referenced_post.caption = None
 
+        if translate and link.platform == Platform.TWITTER and not strip_caption:
+            await _translate_result(result)
+
         await _send_result(message, result, has_spoiler=link.is_spoiler)
+
+
+async def _translate_result(result: ScrapedMedia) -> None:
+    """Translate *result*'s caption (and any referenced_post caption) in place.
+
+    Main and referenced posts are translated in parallel; each independently
+    skipped when its own ``lang`` is Portuguese or its caption is empty. Errors
+    are absorbed inside ``translate_to_portuguese`` and surface as the original
+    text — never raised.
+    """
+    tasks: list[tuple[ScrapedMedia, asyncio.Task[str]]] = []
+    if result.caption:
+        tasks.append(
+            (result, asyncio.create_task(translate_to_portuguese(result.caption, result.lang)))
+        )
+    if result.referenced_post is not None and result.referenced_post.caption:
+        ref = result.referenced_post
+        tasks.append((ref, asyncio.create_task(translate_to_portuguese(ref.caption, ref.lang))))
+    for target, task in tasks:
+        target.caption = await task
 
 
 HELP_TEXT = """<b>Fuuka</b> — expansora de links de redes sociais
@@ -107,6 +136,7 @@ Eu extraio e reencaminho automaticamente mídias de links compartilhados neste c
 /ignore — postar um link sem eu expandir
 /noreply — expandir o link mas ocultar o post citado/respondido
 /nocaption — enviar apenas a mídia (imagem/vídeo) sem a legenda
+/translate — traduzir o tweet para português (somente Twitter/X)
 
 <b>Como funciona:</b>
 Basta compartilhar um link suportado e eu respondo com a mídia ou conteúdo do post. \
@@ -119,7 +149,7 @@ async def handle_help(message: Message) -> None:
     await message.reply(HELP_TEXT, parse_mode="HTML")
 
 
-_COMMAND_NAMES: tuple[str, ...] = ("ignore", "noreply", "nocaption")
+_COMMAND_NAMES: tuple[str, ...] = ("ignore", "noreply", "nocaption", "translate")
 # Standalone-token match so ``/nocaption`` works at any position in the text but
 # not when glued to other characters (``x/nocaption``). Optional ``@botname``
 # suffix is tolerated for group chats.
@@ -153,6 +183,7 @@ async def handle_media_link(message: Message, detected_links: list[DetectedLink]
         detected_links,
         strip_referenced="noreply" in commands,
         strip_caption="nocaption" in commands,
+        translate="translate" in commands,
     )
 
 

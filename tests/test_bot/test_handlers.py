@@ -150,9 +150,12 @@ async def _capture_handle(text: str):
     forwarded to _process_links."""
     captured: dict = {}
 
-    async def fake_process(msg, links, *, strip_referenced=False, strip_caption=False):
+    async def fake_process(
+        msg, links, *, strip_referenced=False, strip_caption=False, translate=False
+    ):
         captured["strip_caption"] = strip_caption
         captured["strip_referenced"] = strip_referenced
+        captured["translate"] = translate
         captured["links"] = links
 
     message = AsyncMock()
@@ -204,3 +207,103 @@ async def test_handle_media_link_ignore_short_circuits():
         await handlers.handle_media_link(message, [_link()])
 
     process.assert_not_awaited()
+
+
+async def test_handle_media_link_translate_sets_flag():
+    captured = await _capture_handle("/translate https://x.com/u/status/1")
+    assert captured["translate"] is True
+    assert captured["strip_caption"] is False
+    assert captured["strip_referenced"] is False
+
+
+async def test_translate_replaces_caption_for_twitter():
+    scraper = AsyncMock()
+    result = _result(caption="hello world")
+    result.lang = "en"
+    scraper.extract.return_value = result
+    message = AsyncMock()
+    send = AsyncMock()
+    fake_translate = AsyncMock(return_value="olá mundo")
+
+    with (
+        patch.dict(handlers._SCRAPER_MAP, {Platform.TWITTER: scraper}, clear=True),
+        patch.object(handlers, "_send_result", send),
+        patch.object(handlers, "translate_to_portuguese", fake_translate),
+    ):
+        await handlers._process_links(message, [_link()], translate=True)
+
+    fake_translate.assert_awaited_once_with("hello world", "en")
+    sent = send.call_args.args[1]
+    assert sent.caption == "olá mundo"
+
+
+async def test_translate_skipped_for_non_twitter():
+    scraper = AsyncMock()
+    yt_result = ScrapedMedia(
+        platform=Platform.YOUTUBE,
+        original_url="https://youtu.be/abc",
+        caption="some title",
+        media_items=[MediaItem(url="https://x/v.mp4", media_type=MediaType.VIDEO)],
+    )
+    yt_result.lang = "en"
+    scraper.extract.return_value = yt_result
+    message = AsyncMock()
+    send = AsyncMock()
+    fake_translate = AsyncMock(return_value="should not run")
+
+    yt_link = DetectedLink(url="https://youtu.be/abc", platform=Platform.YOUTUBE, is_spoiler=False)
+    with (
+        patch.dict(handlers._SCRAPER_MAP, {Platform.YOUTUBE: scraper}, clear=True),
+        patch.object(handlers, "_send_result", send),
+        patch.object(handlers, "translate_to_portuguese", fake_translate),
+    ):
+        await handlers._process_links(message, [yt_link], translate=True)
+
+    fake_translate.assert_not_awaited()
+    sent = send.call_args.args[1]
+    assert sent.caption == "some title"
+
+
+async def test_translate_handles_main_and_referenced_independently():
+    scraper = AsyncMock()
+    result = _result(caption="english main", with_ref=True, ref_caption="japanese parent")
+    result.lang = "en"
+    result.referenced_post.lang = "ja"
+    scraper.extract.return_value = result
+    message = AsyncMock()
+    send = AsyncMock()
+
+    async def translate(text: str, lang: str | None) -> str:
+        return f"pt({lang}):{text}"
+
+    with (
+        patch.dict(handlers._SCRAPER_MAP, {Platform.TWITTER: scraper}, clear=True),
+        patch.object(handlers, "_send_result", send),
+        patch.object(handlers, "translate_to_portuguese", side_effect=translate),
+    ):
+        await handlers._process_links(message, [_link()], translate=True)
+
+    sent = send.call_args.args[1]
+    assert sent.caption == "pt(en):english main"
+    assert sent.referenced_post.caption == "pt(ja):japanese parent"
+
+
+async def test_translate_skipped_when_nocaption_active():
+    """``/nocaption`` strips captions before we'd translate them — translator
+    must not run at all in that case (no API call, no cost)."""
+    scraper = AsyncMock()
+    result = _result(caption="english main")
+    result.lang = "en"
+    scraper.extract.return_value = result
+    message = AsyncMock()
+    send = AsyncMock()
+    fake_translate = AsyncMock(return_value="should not run")
+
+    with (
+        patch.dict(handlers._SCRAPER_MAP, {Platform.TWITTER: scraper}, clear=True),
+        patch.object(handlers, "_send_result", send),
+        patch.object(handlers, "translate_to_portuguese", fake_translate),
+    ):
+        await handlers._process_links(message, [_link()], strip_caption=True, translate=True)
+
+    fake_translate.assert_not_awaited()
