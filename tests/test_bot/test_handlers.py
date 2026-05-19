@@ -318,9 +318,7 @@ async def test_skip_extraction_results_in_no_reply():
     message = AsyncMock()
     send = AsyncMock()
 
-    yt_link = DetectedLink(
-        url="https://youtu.be/abc", platform=Platform.YOUTUBE, is_spoiler=False
-    )
+    yt_link = DetectedLink(url="https://youtu.be/abc", platform=Platform.YOUTUBE, is_spoiler=False)
     with (
         patch.dict(handlers._SCRAPER_MAP, {Platform.YOUTUBE: scraper}, clear=True),
         patch.object(handlers, "_send_result", send),
