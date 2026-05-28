@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     cookies_file: str | None = None
     cookies_from_browser: str | None = None  # e.g. "chrome", "firefox", "edge"
 
+    # Optional residential proxy for YouTube only, to dodge the datacenter-IP
+    # bot-gate (e.g. a home/Umbrel SOCKS5 reached over Tailscale):
+    # "socks5://100.x.y.z:1080". If the proxy is unreachable the YouTube scraper
+    # retries directly, so this stays a best-effort optimization, not a hard dep.
+    youtube_proxy: str | None = None
+
     # yt-dlp JS runtime for YouTube (required since yt-dlp 2025+)
     ytdlp_js_runtime: str | None = None  # e.g. "deno", "nodejs", "deno:/path/to/deno"
 
