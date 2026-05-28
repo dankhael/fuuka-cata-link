@@ -57,15 +57,46 @@ async def ytdlp_info(url: str, extra_args: list[str] | None = None) -> dict:
     return json.loads(stdout)
 
 
+# Substrings yt-dlp / urllib emit when the *proxy itself* is unreachable (as
+# opposed to the upstream site rejecting us). Callers use these to tell a dead
+# proxy apart from a genuine extraction failure and fall back to direct.
+_PROXY_CONNECTION_ERROR_MARKERS = (
+    "unable to connect to proxy",
+    "cannot connect to proxy",
+    "failed to connect to proxy",
+    "proxyerror",
+    "error connecting to socks",
+    "connection to socks",
+    "socks5 proxy",
+)
+
+
+def is_proxy_connection_error(message: str) -> bool:
+    """Return True if *message* looks like the configured proxy was unreachable.
+
+    >>> is_proxy_connection_error("yt-dlp download failed: Unable to connect to proxy")
+    True
+    >>> is_proxy_connection_error("ERROR: [youtube] Sign in to confirm you're not a bot")
+    False
+    """
+    lowered = message.lower()
+    return any(marker in lowered for marker in _PROXY_CONNECTION_ERROR_MARKERS)
+
+
 async def ytdlp_download(
     url: str,
     extra_args: list[str] | None = None,
     cookies_file: str | None = None,
+    proxy: str | None = None,
 ) -> YtdlpResult:
     """Download media via yt-dlp directly and return bytes + metadata.
 
     This avoids the signed-URL problem by letting yt-dlp handle the full
     download pipeline rather than extracting a URL and fetching it ourselves.
+
+    Pass *proxy* (e.g. ``socks5://host:1080``) to route through a residential
+    proxy; on a proxy-connection failure the error message satisfies
+    ``is_proxy_connection_error`` so callers can retry without it.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         output_template = str(Path(tmpdir) / "media.%(ext)s")
@@ -96,6 +127,8 @@ async def ytdlp_download(
             cmd.extend(["--cookies", writable_cookies])
         elif settings.cookies_from_browser:
             cmd.extend(["--cookies-from-browser", settings.cookies_from_browser])
+        if proxy:
+            cmd.extend(["--proxy", proxy])
         if settings.ytdlp_js_runtime:
             cmd.extend(["--js-runtimes", settings.ytdlp_js_runtime])
         if extra_args:
