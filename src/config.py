@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     max_file_size_mb: int = 50
     auto_download_limit_mb: int = 10  # Compress media above this to ensure Telegram auto-downloads
     download_timeout_seconds: int = 30
+    # Hard wall-clock ceiling per yt-dlp invocation. yt-dlp's own retries/socket
+    # timeouts can stack into multi-minute hangs over a flaky proxy (DAN-80);
+    # exceeding this kills the process so a single link can't block for minutes.
+    ytdlp_timeout_seconds: int = 90
     concurrent_downloads: int = 3
 
     # Logging
