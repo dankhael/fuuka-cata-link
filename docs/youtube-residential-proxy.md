@@ -177,6 +177,48 @@ fallback works. Start it again with `docker start youtube-proxy`.
 | Proxy works but YouTube still bot-gates | residential IP also flagged, or needs a token | Add the `player_client=tv,web_safari` extractor arg or a PO-token provider (see the analysis notes). |
 | Big videos are very slow | home **upload** bandwidth is the bottleneck | Expected — video flows YouTube → home → VPS. Fine for Shorts; large videos will crawl on slow uplinks. |
 | Proxy dies after Umbrel reboot | container restart policy | The `--restart unless-stopped` flag handles this; re-run the `docker run` if you omitted it. |
+| Logs show `Unable to download API page: timed out` (retries x3) | proxy/DNS stalls on small API calls | Switch `.env` to `socks5://` (drop the `h`) so DNS resolves VPS-side instead of through the proxy — see [Tuning](#tuning). The bot now caps such hangs via `YTDLP_TIMEOUT_SECONDS`. |
+| A single link blocks the bot for minutes | yt-dlp retries stacking over a flaky proxy | Bounded since DAN-80 by `YTDLP_TIMEOUT_SECONDS` (default 90s) — lower it if you want faster give-up. |
+| Posting a video takes ~1–2 min, mostly "compressing" | re-encode of mid-size videos | Raise `AUTO_DOWNLOAD_LIMIT_MB` so fewer videos are compressed — see [Tuning](#tuning). |
+
+---
+
+## Tuning
+
+Two `.env` knobs noticeably affect speed and reliability once the proxy is in
+use. Both are optional — defaults are safe.
+
+### `socks5://` vs `socks5h://`
+
+`socks5h://` resolves DNS **through the proxy** (at home). If the home proxy's
+DNS is slow or flaky, every YouTube API call can time out even though bandwidth
+is fine. Because IP-gating only cares about where the TCP connection *exits*
+(home, either way), `socks5://` — which resolves DNS on the VPS — is equally
+effective at dodging the bot-gate and removes the proxy-DNS dependency:
+
+```dotenv
+YOUTUBE_PROXY=socks5://botproxy:password@100.101.102.103:1080
+```
+
+Prefer `socks5h://` only if you specifically want to avoid VPS-side DNS leaks.
+
+### `AUTO_DOWNLOAD_LIMIT_MB`
+
+Videos larger than this are re-encoded so Telegram clients auto-download them.
+On a slow VPS CPU the re-encode can dominate total time (e.g. ~68s for a 26 MB
+clip). Raising the threshold skips compression for mid-size videos at the cost
+of larger uploads:
+
+```dotenv
+AUTO_DOWNLOAD_LIMIT_MB=25   # default is 10
+```
+
+### `YTDLP_TIMEOUT_SECONDS`
+
+Hard wall-clock ceiling per yt-dlp call (default `90`). Introduced in DAN-80 to
+stop a flaky proxy from stacking yt-dlp's internal retries into multi-minute
+hangs. Lower it for snappier failures, raise it if legitimately large downloads
+over a slow uplink get cut off.
 
 ---
 
