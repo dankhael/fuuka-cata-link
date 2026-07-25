@@ -90,6 +90,35 @@ async def test_backstop_cap_when_probe_lacks_duration():
 
 
 @pytest.mark.asyncio
+async def test_oversized_video_skipped_before_download():
+    """A video too big to send is dropped by the up-front probe — no transfer,
+    and no error message in the chat."""
+    scraper = YouTubeScraper()
+    download = AsyncMock()
+    huge = {"duration": 60, "filesize_approx": 900 * 1024 * 1024}
+
+    with patch("src.scrapers.youtube.ytdlp_info", new=AsyncMock(return_value=huge)):
+        with patch("src.scrapers.youtube.ytdlp_download", new=download):
+            with pytest.raises(SkipExtraction):
+                await scraper._primary_extract("https://youtu.be/hugevideo")
+
+    download.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_oversized_download_skips_instead_of_erroring(short_video_info):
+    """When the probe can't predict the size, yt-dlp aborts on --max-filesize and
+    returns no data. That must stay silent, not surface as an extraction error —
+    the empty `data` used to raise RuntimeError and reply to the chat."""
+    scraper = YouTubeScraper()
+    too_large = _result(title="huge", duration=120.0, data=None, exceeds_size_limit=True)
+
+    with patch("src.scrapers.youtube.ytdlp_download", new=AsyncMock(return_value=too_large)):
+        with pytest.raises(SkipExtraction):
+            await scraper._primary_extract("https://youtu.be/hugevideo")
+
+
+@pytest.mark.asyncio
 async def test_probe_failure_does_not_block_valid_video():
     """A flaky metadata probe (proxy/network) must not lose a short, valid
     video — the failure is swallowed and the download still runs (DAN-80)."""

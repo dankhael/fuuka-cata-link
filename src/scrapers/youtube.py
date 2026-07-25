@@ -10,11 +10,12 @@ from src.config import settings
 from src.scrapers.base import BaseScraper, MediaItem, MediaType, ScrapedMedia, SkipExtraction
 from src.utils.link_detector import Platform
 from src.utils.proxy import is_proxy_reachable, redact_proxy_credentials
-from src.utils.ytdlp import YtdlpResult, ytdlp_download, ytdlp_info
+from src.utils.ytdlp import YtdlpResult, expected_filesize, ytdlp_download, ytdlp_info
 
 logger = structlog.get_logger()
 
 _MAX_YOUTUBE_DURATION_SECONDS = 318
+_MAX_BYTES = settings.max_file_size_mb * 1024 * 1024
 
 T = TypeVar("T")
 
@@ -42,6 +43,13 @@ class YouTubeScraper(BaseScraper):
                 f"{_MAX_YOUTUBE_DURATION_SECONDS}s for {url!r}"
             )
 
+        # Oversized is "unsupported", not "broken": an over-limit video used to
+        # surface as data=None and reach the chat as an extraction error.
+        if result.exceeds_size_limit:
+            raise SkipExtraction(
+                f"youtube video exceeds the {settings.max_file_size_mb}MB send cap for {url!r}"
+            )
+
         if not result.data:
             raise RuntimeError("yt-dlp downloaded no data for YouTube URL")
 
@@ -57,7 +65,7 @@ class YouTubeScraper(BaseScraper):
         )
 
     async def _skip_if_over_cap(self, url: str) -> None:
-        """Probe duration up front and skip long videos before downloading.
+        """Probe up front and skip videos we can't send before downloading them.
 
         Checking after the download wastes a full (proxy-slow) transfer on
         videos we're going to drop, and silently no-ops when yt-dlp returns
@@ -74,6 +82,12 @@ class YouTubeScraper(BaseScraper):
             raise SkipExtraction(
                 f"youtube duration {duration:.0f}s exceeds cap "
                 f"{_MAX_YOUTUBE_DURATION_SECONDS}s for {url!r}"
+            )
+        size = expected_filesize(info)
+        if size and size > _MAX_BYTES:
+            raise SkipExtraction(
+                f"youtube filesize {size / 1024 / 1024:.0f}MB exceeds cap "
+                f"{settings.max_file_size_mb}MB for {url!r}"
             )
 
     async def _download_with_proxy_fallback(self, url: str) -> YtdlpResult:

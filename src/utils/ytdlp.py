@@ -35,6 +35,10 @@ class YtdlpResult:
     is_video: bool = True
     is_animation: bool = False  # True for GIFs
     duration: float | None = None  # seconds
+    # True when the media was dropped for exceeding MAX_FILE_SIZE_MB (either
+    # yt-dlp aborted on --max-filesize or the merged file came out over it).
+    # Lets callers tell "too big to send" apart from a genuine failure.
+    exceeds_size_limit: bool = False
 
 
 # Cap yt-dlp's internal retries. Its defaults retry each HTTP step many times,
@@ -53,6 +57,25 @@ _FAST_FAIL_ARGS = [
 
 def _fast_fail_args() -> list[str]:
     return [*_FAST_FAIL_ARGS, str(settings.download_timeout_seconds)]
+
+
+def expected_filesize(info: dict) -> int | None:
+    """Best available size estimate (bytes) for what yt-dlp would download.
+
+    Reads the metadata dict from :func:`ytdlp_info`, so callers can drop
+    oversized media *before* paying for the transfer. Returns ``None`` when
+    the extractor exposes no size at all.
+
+    >>> expected_filesize({"filesize_approx": 12_000_000})
+    12000000
+    """
+    parts = [
+        fmt.get("filesize") or fmt.get("filesize_approx")
+        for fmt in info.get("requested_formats") or []
+    ]
+    if parts and all(parts):
+        return sum(parts)
+    return info.get("filesize") or info.get("filesize_approx")
 
 
 async def _run_ytdlp(cmd: list[str], *, what: str) -> tuple[int, bytes, bytes]:
@@ -174,16 +197,30 @@ async def ytdlp_download(
         if info_files:
             info = json.loads(info_files[0].read_text(encoding="utf-8"))
 
+        limit_bytes = settings.max_file_size_mb * 1024 * 1024
         data: bytes | None = None
         ext = "mp4"
+        exceeds_size_limit = False
         if media_files:
             media_file = media_files[0]
             ext = media_file.suffix.lstrip(".")
             file_size = media_file.stat().st_size
-            if file_size <= settings.max_file_size_mb * 1024 * 1024:
+            if file_size <= limit_bytes:
                 data = media_file.read_bytes()
             else:
+                exceeds_size_limit = True
                 logger.warning("ytdlp_file_too_large", size_mb=round(file_size / 1024 / 1024, 1))
+        else:
+            # --max-filesize aborts *before* writing anything and still exits 0,
+            # leaving only the info json. Without this the caller can't tell an
+            # over-limit video from a broken download.
+            predicted = expected_filesize(info)
+            exceeds_size_limit = predicted is not None and predicted > limit_bytes
+            if exceeds_size_limit:
+                logger.warning(
+                    "ytdlp_download_aborted_too_large",
+                    size_mb=round(predicted / 1024 / 1024, 1),
+                )
 
         is_animation = ext in ("gif", "gifv")
         is_video = ext in ("mp4", "webm", "mkv", "mov", "avi", "flv") and not is_animation
@@ -198,4 +235,5 @@ async def ytdlp_download(
             is_video=is_video,
             is_animation=is_animation,
             duration=info.get("duration"),
+            exceeds_size_limit=exceeds_size_limit,
         )
