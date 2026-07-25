@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import functools
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
+
 import structlog
 
 from src.config import settings
 from src.scrapers.base import BaseScraper, MediaItem, MediaType, ScrapedMedia, SkipExtraction
 from src.utils.link_detector import Platform
 from src.utils.proxy import is_proxy_reachable, redact_proxy_credentials
-from src.utils.ytdlp import YtdlpResult, ytdlp_download
+from src.utils.ytdlp import YtdlpResult, ytdlp_download, ytdlp_info
 
 logger = structlog.get_logger()
 
 _MAX_YOUTUBE_DURATION_SECONDS = 318
+
+T = TypeVar("T")
 
 
 class YouTubeScraper(BaseScraper):
@@ -22,12 +28,14 @@ class YouTubeScraper(BaseScraper):
         """Use yt-dlp as the primary method for YouTube (most reliable).
 
         Deliberately *not* also exposed as ``_ytdlp_extract``: the base chain
-        calls both, so aliasing them ran the same download twice per link.
+        calls both, so aliasing them ran the whole probe+download twice per link.
         """
+        await self._skip_if_over_cap(url)
+
         result = await self._download_with_proxy_fallback(url)
 
-        # Silently drop videos over the cap (DAN-71): replying with an error
-        # message just spammed chats whenever someone shared a long video.
+        # Backstop cap check (DAN-71): the up-front probe is best-effort, so the
+        # download's own metadata still enforces the cap when the probe couldn't.
         if result.duration and result.duration > _MAX_YOUTUBE_DURATION_SECONDS:
             raise SkipExtraction(
                 f"youtube duration {result.duration:.0f}s exceeds cap "
@@ -48,36 +56,62 @@ class YouTubeScraper(BaseScraper):
             media_items=[item],
         )
 
+    async def _skip_if_over_cap(self, url: str) -> None:
+        """Probe duration up front and skip long videos before downloading.
+
+        Checking after the download wastes a full (proxy-slow) transfer on
+        videos we're going to drop, and silently no-ops when yt-dlp returns
+        incomplete metadata (duration=None). Probe failures are swallowed — the
+        download path stays the backstop — so a flaky metadata call never blocks
+        a short, valid video (DAN-80).
+        """
+        try:
+            info = await self._info_with_proxy_fallback(url)
+        except RuntimeError:
+            return
+        duration = info.get("duration")
+        if duration and duration > _MAX_YOUTUBE_DURATION_SECONDS:
+            raise SkipExtraction(
+                f"youtube duration {duration:.0f}s exceeds cap "
+                f"{_MAX_YOUTUBE_DURATION_SECONDS}s for {url!r}"
+            )
+
     async def _download_with_proxy_fallback(self, url: str) -> YtdlpResult:
-        """Download via the configured residential proxy, falling back to a
-        direct connection whenever the proxied attempt doesn't pan out.
+        runner = functools.partial(ytdlp_download, cookies_file=settings.cookies_file)
+        return await self._with_proxy_fallback(url, runner)
+
+    async def _info_with_proxy_fallback(self, url: str) -> dict:
+        return await self._with_proxy_fallback(url, ytdlp_info)
+
+    async def _with_proxy_fallback(self, url: str, run: Callable[..., Awaitable[T]]) -> T:
+        """Run *run*(url, proxy=...) through the residential proxy, falling back
+        to a direct call whenever the proxied attempt doesn't pan out.
 
         The proxy (e.g. a home/Umbrel SOCKS5) exists to dodge YouTube's
         datacenter-IP bot-gate, but it must not become a single point of
         failure. Two guards keep that promise:
 
-        1. A TCP probe *before* the download, so a dead proxy costs one refused
-           connect instead of yt-dlp's three-retry storm. The probe is the only
-           reliable signal — yt-dlp reports a refused proxy as an OS-localized
-           "connection refused" that never mentions the proxy at all.
-        2. One direct retry if the proxied download fails anyway (SOCKS auth
-           reject, or the proxy dying mid-transfer). This replaces the base
-           chain's second yt-dlp attempt rather than adding to it.
+        1. A TCP probe *before* the call, so a dead proxy costs one refused
+           connect instead of yt-dlp's retries and wall-clock ceiling. The probe
+           is the only reliable signal — yt-dlp reports a refused proxy as an
+           OS-localized "connection refused" that never mentions the proxy.
+        2. One direct retry if the proxied call fails anyway (SOCKS auth reject,
+           or the proxy dying mid-transfer). This replaces the base chain's
+           second yt-dlp attempt rather than adding to it.
         """
-        cookies_file = settings.cookies_file
         proxy = settings.youtube_proxy
         if not proxy:
-            return await ytdlp_download(url, cookies_file=cookies_file)
+            return await run(url)
 
         safe_proxy = redact_proxy_credentials(proxy)
         if not await is_proxy_reachable(proxy):
             logger.warning("youtube_proxy_unreachable", url=url, proxy=safe_proxy)
-            return await ytdlp_download(url, cookies_file=cookies_file)
+            return await run(url)
 
         try:
-            return await ytdlp_download(url, cookies_file=cookies_file, proxy=proxy)
+            return await run(url, proxy=proxy)
         except RuntimeError as exc:
             logger.warning(
                 "youtube_proxy_attempt_failed", url=url, proxy=safe_proxy, error=str(exc)
             )
-            return await ytdlp_download(url, cookies_file=cookies_file)
+            return await run(url)

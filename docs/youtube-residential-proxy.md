@@ -139,16 +139,17 @@ The proxy is scoped to **YouTube only** — Twitter, Instagram, Reddit, etc. kee
 going direct from the VPS, so they aren't slowed by the extra home-network hop.
 
 The YouTube scraper ([`src/scrapers/youtube.py`](../src/scrapers/youtube.py))
-**opens a TCP connection to the proxy before every YouTube download** and skips
-it when that fails:
+makes two proxied yt-dlp calls per link — the duration probe, then the download
+— and **opens a TCP connection to the proxy before each of them**, skipping it
+when that fails:
 
 - **Proxy works** → YouTube sees your residential IP. 👍
 - **Proxy down** (Umbrel reboot, Tailscale hiccup, container stopped) → the probe
-  is refused, the bot logs `youtube_proxy_unreachable`, and the download runs
+  is refused, the bot logs `youtube_proxy_unreachable`, and the call runs
   directly instead.
-- **Proxy up but the download through it fails** (wrong SOCKS password, proxy
-  dies mid-transfer) → the bot logs `youtube_proxy_attempt_failed` and retries
-  once directly.
+- **Proxy up but the call through it fails** (wrong SOCKS password, proxy dies
+  mid-transfer) → the bot logs `youtube_proxy_attempt_failed` and retries once
+  directly.
 - **`YOUTUBE_PROXY` unset** → behaves exactly as before, direct only.
 
 This is why the proxy is an *optimization*, not a dependency.
@@ -157,7 +158,9 @@ This is why the proxy is an *optimization*, not a dependency.
 > yt-dlp reports only the underlying socket error — `[Errno 111] Connection
 > refused` / `[WinError 10061] …`, in the OS's language, with no mention of a
 > proxy. There is no error text to match on, so the socket is checked directly.
-> The probe also spares yt-dlp its three connect retries against a dead host.
+> The probe is also the cheap path: skipping a dead proxy up front costs one
+> refused connect, versus yt-dlp burning its retries and its
+> `YTDLP_TIMEOUT_SECONDS` ceiling on a host that will never answer.
 
 Both warnings log the proxy URL with its password masked
 (`socks5h://botproxy:***@100.101.102.103:1080`), so `logs/errors.log` stays safe

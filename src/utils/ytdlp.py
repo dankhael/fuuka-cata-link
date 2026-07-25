@@ -37,22 +37,66 @@ class YtdlpResult:
     duration: float | None = None  # seconds
 
 
-async def ytdlp_info(url: str, extra_args: list[str] | None = None) -> dict:
+# Cap yt-dlp's internal retries. Its defaults retry each HTTP step many times,
+# stacking socket timeouts into multi-minute hangs over a flaky proxy (DAN-80).
+# One retry is plenty; _run_ytdlp's wall-clock ceiling is the real backstop.
+_FAST_FAIL_ARGS = [
+    "--retries",
+    "1",
+    "--extractor-retries",
+    "1",
+    "--fragment-retries",
+    "1",
+    "--socket-timeout",
+]
+
+
+def _fast_fail_args() -> list[str]:
+    return [*_FAST_FAIL_ARGS, str(settings.download_timeout_seconds)]
+
+
+async def _run_ytdlp(cmd: list[str], *, what: str) -> tuple[int, bytes, bytes]:
+    """Run a yt-dlp command, killing it if it exceeds ``ytdlp_timeout_seconds``.
+
+    yt-dlp's --socket-timeout/--retries only bound individual HTTP attempts; a
+    flaky proxy can still stack them into multi-minute hangs (DAN-80), so we
+    enforce one wall-clock ceiling and kill the process if it is exceeded.
+    Returns (returncode, stdout, stderr).
+    """
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=settings.ytdlp_timeout_seconds
+        )
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError(
+            f"yt-dlp {what} timed out after {settings.ytdlp_timeout_seconds}s"
+        ) from None
+    return proc.returncode or 0, stdout, stderr
+
+
+async def ytdlp_info(
+    url: str, extra_args: list[str] | None = None, proxy: str | None = None
+) -> dict:
     """Run yt-dlp --dump-json to get metadata without downloading."""
     cmd = ["yt-dlp", "--dump-json", "--no-download", "--remote-components", "ejs:github"]
+    cmd.extend(_fast_fail_args())
+    if proxy:
+        cmd.extend(["--proxy", proxy])
     if settings.ytdlp_js_runtime:
         cmd.extend(["--js-runtimes", settings.ytdlp_js_runtime])
     if extra_args:
         cmd.extend(extra_args)
     cmd.append(url)
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
+    returncode, stdout, stderr = await _run_ytdlp(cmd, what="info")
+    if returncode != 0:
         raise RuntimeError(
             f"yt-dlp info failed: {redact_proxy_credentials(stderr.decode().strip())}"
         )
@@ -90,10 +134,9 @@ async def ytdlp_download(
             "--max-filesize",
             f"{settings.max_file_size_mb}M",
             "--write-info-json",
-            "--socket-timeout",
-            str(settings.download_timeout_seconds),
             "--remote-components",
             "ejs:github",
+            *_fast_fail_args(),
         ]
         if cookies_file:
             # Copy cookies to a separate subdirectory so yt-dlp can save updated
@@ -113,14 +156,9 @@ async def ytdlp_download(
             cmd.extend(extra_args)
         cmd.append(url)
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
+        returncode, stdout, stderr = await _run_ytdlp(cmd, what="download")
 
-        if proc.returncode != 0:
+        if returncode != 0:
             raise RuntimeError(
                 f"yt-dlp download failed: {redact_proxy_credentials(stderr.decode().strip())}"
             )
