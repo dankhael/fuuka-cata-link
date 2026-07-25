@@ -5,7 +5,8 @@ import structlog
 from src.config import settings
 from src.scrapers.base import BaseScraper, MediaItem, MediaType, ScrapedMedia, SkipExtraction
 from src.utils.link_detector import Platform
-from src.utils.ytdlp import YtdlpResult, is_proxy_connection_error, ytdlp_download
+from src.utils.proxy import is_proxy_reachable, redact_proxy_credentials
+from src.utils.ytdlp import YtdlpResult, ytdlp_download
 
 logger = structlog.get_logger()
 
@@ -18,10 +19,11 @@ class YouTubeScraper(BaseScraper):
         return Platform.YOUTUBE
 
     async def _primary_extract(self, url: str) -> ScrapedMedia:
-        """Use yt-dlp as the primary method for YouTube (most reliable)."""
-        return await self._ytdlp_extract(url)
+        """Use yt-dlp as the primary method for YouTube (most reliable).
 
-    async def _ytdlp_extract(self, url: str) -> ScrapedMedia:
+        Deliberately *not* also exposed as ``_ytdlp_extract``: the base chain
+        calls both, so aliasing them ran the same download twice per link.
+        """
         result = await self._download_with_proxy_fallback(url)
 
         # Silently drop videos over the cap (DAN-71): replying with an error
@@ -48,23 +50,34 @@ class YouTubeScraper(BaseScraper):
 
     async def _download_with_proxy_fallback(self, url: str) -> YtdlpResult:
         """Download via the configured residential proxy, falling back to a
-        direct connection if the proxy itself is unreachable.
+        direct connection whenever the proxied attempt doesn't pan out.
 
         The proxy (e.g. a home/Umbrel SOCKS5) exists to dodge YouTube's
         datacenter-IP bot-gate, but it must not become a single point of
-        failure: if it's momentarily down we still try direct. A genuine
-        extraction failure *through* the proxy is re-raised so the base
-        fallback chain handles it normally.
+        failure. Two guards keep that promise:
+
+        1. A TCP probe *before* the download, so a dead proxy costs one refused
+           connect instead of yt-dlp's three-retry storm. The probe is the only
+           reliable signal — yt-dlp reports a refused proxy as an OS-localized
+           "connection refused" that never mentions the proxy at all.
+        2. One direct retry if the proxied download fails anyway (SOCKS auth
+           reject, or the proxy dying mid-transfer). This replaces the base
+           chain's second yt-dlp attempt rather than adding to it.
         """
         cookies_file = settings.cookies_file
         proxy = settings.youtube_proxy
         if not proxy:
             return await ytdlp_download(url, cookies_file=cookies_file)
 
+        safe_proxy = redact_proxy_credentials(proxy)
+        if not await is_proxy_reachable(proxy):
+            logger.warning("youtube_proxy_unreachable", url=url, proxy=safe_proxy)
+            return await ytdlp_download(url, cookies_file=cookies_file)
+
         try:
             return await ytdlp_download(url, cookies_file=cookies_file, proxy=proxy)
         except RuntimeError as exc:
-            if not is_proxy_connection_error(str(exc)):
-                raise
-            logger.warning("youtube_proxy_unreachable", url=url, proxy=proxy, error=str(exc))
+            logger.warning(
+                "youtube_proxy_attempt_failed", url=url, proxy=safe_proxy, error=str(exc)
+            )
             return await ytdlp_download(url, cookies_file=cookies_file)

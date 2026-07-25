@@ -7,8 +7,8 @@ normal household connection instead.
 
 This guide sets up an always-on [Umbrel](https://umbrel.com/) box at home as a
 small SOCKS5 proxy, links it to the VPS over a private [Tailscale](https://tailscale.com/)
-tunnel, and points the bot at it. The proxy is **best-effort**: if it's ever
-down, the bot automatically retries YouTube directly (see
+tunnel, and points the bot at it. The proxy is **best-effort**: the bot checks
+it is up before each YouTube download and goes direct when it isn't (see
 [How the bot uses it](#how-the-bot-uses-it)), so it can never take the bot offline.
 
 ```
@@ -138,17 +138,30 @@ so the container reaches the Umbrel's tailnet IP automatically.
 The proxy is scoped to **YouTube only** — Twitter, Instagram, Reddit, etc. keep
 going direct from the VPS, so they aren't slowed by the extra home-network hop.
 
-The YouTube scraper ([`src/scrapers/youtube.py`](../src/scrapers/youtube.py)) tries
-the proxy first and **falls back to a direct connection if the proxy is
-unreachable**:
+The YouTube scraper ([`src/scrapers/youtube.py`](../src/scrapers/youtube.py))
+**opens a TCP connection to the proxy before every YouTube download** and skips
+it when that fails:
 
 - **Proxy works** → YouTube sees your residential IP. 👍
-- **Proxy momentarily down** (Umbrel reboot, Tailscale hiccup) → the bot logs
-  `youtube_proxy_unreachable` once and retries directly, so YouTube extraction
-  still attempts to work instead of hard-failing.
+- **Proxy down** (Umbrel reboot, Tailscale hiccup, container stopped) → the probe
+  is refused, the bot logs `youtube_proxy_unreachable`, and the download runs
+  directly instead.
+- **Proxy up but the download through it fails** (wrong SOCKS password, proxy
+  dies mid-transfer) → the bot logs `youtube_proxy_attempt_failed` and retries
+  once directly.
 - **`YOUTUBE_PROXY` unset** → behaves exactly as before, direct only.
 
 This is why the proxy is an *optimization*, not a dependency.
+
+> **Why probe instead of reading yt-dlp's error?** When the proxy host is down,
+> yt-dlp reports only the underlying socket error — `[Errno 111] Connection
+> refused` / `[WinError 10061] …`, in the OS's language, with no mention of a
+> proxy. There is no error text to match on, so the socket is checked directly.
+> The probe also spares yt-dlp its three connect retries against a dead host.
+
+Both warnings log the proxy URL with its password masked
+(`socks5h://botproxy:***@100.101.102.103:1080`), so `logs/errors.log` stays safe
+to copy off the VPS.
 
 ---
 
@@ -160,11 +173,15 @@ Share a YouTube link in an allowed chat and watch the logs:
 docker compose logs -f telegram-bot
 ```
 
-A successful extraction now egresses via home. To confirm the proxy is actually
-being used, you can temporarily stop the proxy on the Umbrel
-(`docker stop youtube-proxy`) and share another link — you should see a single
-`youtube_proxy_unreachable` warning followed by a direct attempt, proving the
-fallback works. Start it again with `docker start youtube-proxy`.
+A successful extraction now egresses via home. To confirm the fallback works,
+temporarily stop the proxy on the Umbrel (`docker stop youtube-proxy`) and share
+another link — you should see a single `youtube_proxy_unreachable` warning
+followed by a direct attempt. Start it again with `docker start youtube-proxy`.
+
+Note that `docker stop` leaves the Umbrel host itself reachable, so the probe
+gets an immediate connection *refused*. Pulling the Umbrel's network instead
+makes the probe wait out its 3-second timeout before falling back — same
+outcome, one slow request.
 
 ---
 
