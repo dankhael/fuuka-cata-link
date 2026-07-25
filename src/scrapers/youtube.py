@@ -31,12 +31,13 @@ class YouTubeScraper(BaseScraper):
         Deliberately *not* also exposed as ``_ytdlp_extract``: the base chain
         calls both, so aliasing them ran the whole probe+download twice per link.
         """
-        await self._skip_if_over_cap(url)
+        await self._require_sendable(url)
 
         result = await self._download_with_proxy_fallback(url)
 
-        # Backstop cap check (DAN-71): the up-front probe is best-effort, so the
-        # download's own metadata still enforces the cap when the probe couldn't.
+        # Backstop cap check (DAN-71): metadata can still differ between the
+        # probe and the download (format reselection, a lying extractor), so
+        # the download's own numbers get the final say.
         if result.duration and result.duration > _MAX_YOUTUBE_DURATION_SECONDS:
             raise SkipExtraction(
                 f"youtube duration {result.duration:.0f}s exceeds cap "
@@ -64,25 +65,38 @@ class YouTubeScraper(BaseScraper):
             media_items=[item],
         )
 
-    async def _skip_if_over_cap(self, url: str) -> None:
-        """Probe up front and skip videos we can't send before downloading them.
+    async def _require_sendable(self, url: str) -> None:
+        """Prove from metadata that the video is worth downloading, or skip it.
 
-        Checking after the download wastes a full (proxy-slow) transfer on
-        videos we're going to drop, and silently no-ops when yt-dlp returns
-        incomplete metadata (duration=None). Probe failures are swallowed — the
-        download path stays the backstop — so a flaky metadata call never blocks
-        a short, valid video (DAN-80).
+        Downloading first wastes a full (proxy-slow) transfer on videos we are
+        going to drop anyway (DAN-80), so the caps are checked up front.
+
+        A probe that fails or comes back without a duration is skipped too,
+        rather than downloaded on spec as it was before: the probe and the
+        download share one yt-dlp auth path, so a bot-gated or unreachable
+        probe predicts a bot-gated download. Gating on a *successful* check
+        means everything that reaches the download was known-sendable, and a
+        failure there is worth reporting to the chat — the chat never sees an
+        error for a video we were never going to post.
         """
         try:
             info = await self._info_with_proxy_fallback(url)
-        except RuntimeError:
-            return
+        except RuntimeError as exc:
+            logger.warning("youtube_probe_failed", url=url, error=str(exc))
+            raise SkipExtraction(f"youtube metadata probe failed for {url!r}: {exc}") from exc
+
         duration = info.get("duration")
-        if duration and duration > _MAX_YOUTUBE_DURATION_SECONDS:
+        if not duration:
+            logger.warning("youtube_probe_without_duration", url=url)
+            raise SkipExtraction(f"youtube metadata carries no duration for {url!r}")
+        if duration > _MAX_YOUTUBE_DURATION_SECONDS:
             raise SkipExtraction(
                 f"youtube duration {duration:.0f}s exceeds cap "
                 f"{_MAX_YOUTUBE_DURATION_SECONDS}s for {url!r}"
             )
+
+        # Size may legitimately be unknown; the download enforces the cap itself
+        # (--max-filesize + the post-download check), and skips just as quietly.
         size = expected_filesize(info)
         if size and size > _MAX_BYTES:
             raise SkipExtraction(

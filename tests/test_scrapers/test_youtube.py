@@ -77,13 +77,13 @@ async def test_video_within_cap_returns_media(short_video_info):
 
 
 @pytest.mark.asyncio
-async def test_backstop_cap_when_probe_lacks_duration():
-    """When the probe returns no duration, the download's own metadata still
-    enforces the cap — the long video must not slip through (DAN-80)."""
+async def test_backstop_cap_when_download_metadata_disagrees():
+    """The probe's numbers aren't final — when the download reports a duration
+    over the cap, that still wins and the video is dropped (DAN-80)."""
     scraper = YouTubeScraper()
     over_cap = _result(title="too long", duration=400.0, data=b"bytes")
 
-    with patch("src.scrapers.youtube.ytdlp_info", new=AsyncMock(return_value={})):
+    with patch("src.scrapers.youtube.ytdlp_info", new=AsyncMock(return_value={"duration": 10})):
         with patch("src.scrapers.youtube.ytdlp_download", new=AsyncMock(return_value=over_cap)):
             with pytest.raises(SkipExtraction):
                 await scraper._primary_extract("https://youtu.be/longvideo")
@@ -119,20 +119,53 @@ async def test_oversized_download_skips_instead_of_erroring(short_video_info):
 
 
 @pytest.mark.asyncio
-async def test_probe_failure_does_not_block_valid_video():
-    """A flaky metadata probe (proxy/network) must not lose a short, valid
-    video — the failure is swallowed and the download still runs (DAN-80)."""
+async def test_probe_failure_skips_instead_of_downloading_on_spec():
+    """A failed probe means we can't prove the video is sendable. The probe and
+    the download share one yt-dlp auth path, so a bot-gated probe predicts a
+    bot-gated download: skip quietly rather than burn the transfer and reply to
+    the chat with an error about a video we may never have posted anyway."""
     scraper = YouTubeScraper()
-    within_cap = _result(title="ok", duration=120.0, data=b"video-bytes")
+    download = AsyncMock()
 
     with patch(
         "src.scrapers.youtube.ytdlp_info",
-        new=AsyncMock(side_effect=RuntimeError("yt-dlp info failed: timed out")),
+        new=AsyncMock(side_effect=RuntimeError("Sign in to confirm you're not a bot")),
     ):
-        with patch("src.scrapers.youtube.ytdlp_download", new=AsyncMock(return_value=within_cap)):
-            result = await scraper._primary_extract("https://youtu.be/short")
+        with patch("src.scrapers.youtube.ytdlp_download", new=download):
+            with pytest.raises(SkipExtraction):
+                await scraper._primary_extract("https://youtu.be/gated")
 
-    assert result.has_media
+    download.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_probe_without_duration_skips():
+    """Degraded metadata ("Other metadata may also be missing") can't prove the
+    video is under the cap, so it doesn't earn a download either."""
+    scraper = YouTubeScraper()
+    download = AsyncMock()
+
+    with patch("src.scrapers.youtube.ytdlp_info", new=AsyncMock(return_value={"title": "x"})):
+        with patch("src.scrapers.youtube.ytdlp_download", new=download):
+            with pytest.raises(SkipExtraction):
+                await scraper._primary_extract("https://youtu.be/nometadata")
+
+    download.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_download_failure_for_a_sendable_video_still_raises():
+    """The flip side of gating: once a video is proven within the caps, a failed
+    download is a real error and must still reach the chat."""
+    scraper = YouTubeScraper()
+
+    with patch("src.scrapers.youtube.ytdlp_info", new=AsyncMock(return_value={"duration": 10})):
+        with patch(
+            "src.scrapers.youtube.ytdlp_download",
+            new=AsyncMock(side_effect=RuntimeError("yt-dlp download failed: boom")),
+        ):
+            with pytest.raises(RuntimeError, match="boom"):
+                await scraper._primary_extract("https://youtu.be/short")
 
 
 def test_ytdlp_extract_is_not_aliased_to_primary():
