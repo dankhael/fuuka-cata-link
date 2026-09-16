@@ -37,6 +37,11 @@ class Settings(BaseSettings):
 
     # Cookies file for authenticated scraping (Facebook, Instagram, YouTube)
     cookies_file: str | None = None
+    # Writable directory for the *live* copy of cookies_file. YouTube rotates
+    # its session cookies on every use and yt-dlp saves the new values, so the
+    # rotated jar must outlive the run (src/utils/cookie_jar.py). Defaults to
+    # the logs dir because that is the one persistent volume in the compose file.
+    cookies_state_dir: str = "logs"
     cookies_from_browser: str | None = None  # e.g. "chrome", "firefox", "edge"
 
     # Optional residential proxy for YouTube only, to dodge the datacenter-IP

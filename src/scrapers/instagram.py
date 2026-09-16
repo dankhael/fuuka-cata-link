@@ -26,12 +26,14 @@ class InstagramScraper(BaseScraper):
 
     async def _primary_extract(self, url: str) -> ScrapedMedia:
         """Extract Instagram media: yt-dlp (videos) → gallery-dl (images) → embed page."""
-        extra_args = ["--cookies", str(settings.cookies_file)] if settings.cookies_file else []
-        extra_args += ["--no-check-certificates"]
+        extra_args = ["--no-check-certificates"]
 
-        # Phase 1: yt-dlp — handles reels/videos reliably
+        # Phase 1: yt-dlp — handles reels/videos reliably. Cookies go through
+        # ytdlp_download's jar handling so rotations are kept, not via extra_args.
         try:
-            result = await ytdlp_download(url, extra_args=extra_args)
+            result = await ytdlp_download(
+                url, extra_args=extra_args, cookies_file=settings.cookies_file
+            )
             if result.data:
                 if result.is_animation:
                     media_type = MediaType.ANIMATION
