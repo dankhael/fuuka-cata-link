@@ -271,3 +271,20 @@ async def test_probe_size_check_uses_download_cap_not_send_cap():
 
     download.assert_awaited_once()
     assert result.media_items[0].data == b"video-bytes"
+
+
+async def test_probe_uses_the_same_cookies_as_the_download(proxy_settings):
+    """Both yt-dlp calls share one auth path; a cookie-less probe was failing
+    every YouTube link at the bot-gate while the download had cookies."""
+    proxy_settings.youtube_proxy = None
+    proxy_settings.cookies_file = "/app/cookies.txt"
+    scraper = YouTubeScraper()
+    info = AsyncMock(return_value={"duration": 10})
+    download = AsyncMock(return_value=_result(title="ok", duration=10.0, data=b"v"))
+
+    with patch("src.scrapers.youtube.ytdlp_info", new=info):
+        with patch("src.scrapers.youtube.ytdlp_download", new=download):
+            await scraper._primary_extract("https://youtu.be/gated")
+
+    assert info.await_args.kwargs["cookies_file"] == "/app/cookies.txt"
+    assert download.await_args.kwargs["cookies_file"] == "/app/cookies.txt"

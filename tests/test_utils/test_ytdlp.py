@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.utils.ytdlp import _run_ytdlp, expected_filesize, ytdlp_download
+from src.utils.ytdlp import _run_ytdlp, expected_filesize, ytdlp_download, ytdlp_info
 
 
 @pytest.mark.asyncio
@@ -126,3 +126,44 @@ async def test_download_caps_yt_dlp_at_the_download_ceiling_not_the_send_cap():
     assert result.data == b"v" * 1024
     assert run.cmd[run.cmd.index("--max-filesize") + 1] == "200M"
     assert "50M" not in " ".join(run.cmd)
+
+
+class FakeInfoRun:
+    """Captures the yt-dlp argv of a --dump-json probe and returns metadata."""
+
+    def __init__(self) -> None:
+        self.cmd: list[str] = []
+
+    async def __call__(self, cmd: list[str], *, what: str) -> tuple[int, bytes, bytes]:
+        self.cmd = cmd
+        return 0, json.dumps({"duration": 42}).encode(), b""
+
+
+@pytest.mark.asyncio
+async def test_info_probe_sends_a_writable_copy_of_the_cookie_jar(tmp_path):
+    """Regression: the probe ran without cookies, so YouTube's bot-gate failed
+    every link at the metadata step even when the download would have passed."""
+    jar = tmp_path / "cookies.txt"
+    jar.write_text("# Netscape HTTP Cookie File\n")
+    run = FakeInfoRun()
+
+    with patch("src.utils.ytdlp._run_ytdlp", new=run):
+        info = await ytdlp_info("https://youtu.be/gated", cookies_file=str(jar))
+
+    assert info == {"duration": 42}
+    passed_jar = Path(run.cmd[run.cmd.index("--cookies") + 1])
+    assert passed_jar != jar, "yt-dlp rewrites the jar; the mounted original must stay untouched"
+    assert passed_jar.name == "cookies.txt"
+
+
+@pytest.mark.asyncio
+async def test_info_probe_without_cookies_sends_no_cookie_flag():
+    run = FakeInfoRun()
+    with patch("src.utils.ytdlp._run_ytdlp", new=run), patch("src.utils.ytdlp.settings") as cfg:
+        cfg.cookies_from_browser = None
+        cfg.ytdlp_js_runtime = None
+        cfg.download_timeout_seconds = 30
+        await ytdlp_info("https://youtu.be/open")
+
+    assert "--cookies" not in run.cmd
+    assert "--cookies-from-browser" not in run.cmd

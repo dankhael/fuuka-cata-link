@@ -1,6 +1,14 @@
 import pytest
+from structlog.testing import capture_logs
 
-from src.scrapers.base import BaseScraper, MediaItem, MediaType, ScrapedMedia, SkipExtraction
+from src.scrapers.base import (
+    BaseScraper,
+    MediaItem,
+    MediaType,
+    ScrapedMedia,
+    SkipExtraction,
+    describe_exception,
+)
 from src.utils.link_detector import Platform
 
 
@@ -128,3 +136,28 @@ async def test_pre_populated_data_preserved():
     scraper = PrePopulatedScraper()
     result = await scraper.extract("https://tiktok.com/video")
     assert result.media_items[0].data == b"pre_downloaded"
+
+
+class TimingOutScraper(BaseScraper):
+    @property
+    def platform(self) -> Platform:
+        return Platform.TIKTOK
+
+    async def _primary_extract(self, url: str) -> ScrapedMedia:
+        raise TimeoutError()
+
+
+def test_describe_exception_falls_back_to_the_class_name():
+    assert describe_exception(TimeoutError()) == "TimeoutError"
+    assert describe_exception(RuntimeError("boom")) == "boom"
+
+
+@pytest.mark.asyncio
+async def test_empty_exception_message_is_logged_by_type():
+    """Regression: a tikwm timeout was logged as error="" — nothing to grep for."""
+    with capture_logs() as logs:
+        with pytest.raises(RuntimeError):
+            await TimingOutScraper().extract("https://vt.tiktok.com/x/")
+
+    failures = [entry for entry in logs if entry["event"] == "extraction_method_failed"]
+    assert failures[0]["error"] == "TimeoutError"
