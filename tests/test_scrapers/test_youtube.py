@@ -252,3 +252,22 @@ async def test_no_proxy_configured_downloads_directly(proxy_settings, short_vide
     probe.assert_not_awaited()
     download.assert_awaited_once()
     assert download.await_args.kwargs.get("proxy") is None
+
+
+@pytest.mark.asyncio
+async def test_probe_size_check_uses_download_cap_not_send_cap():
+    """A 70MB video is over Telegram's cap but under the download ceiling, so
+    it must be downloaded (and later compressed) rather than skipped."""
+    scraper = YouTubeScraper()
+    ok = _result(title="big", duration=60.0, data=b"video-bytes")
+    seventy_mb = {"duration": 60, "filesize_approx": 70 * 1024 * 1024}
+
+    with (
+        patch("src.scrapers.youtube._MAX_BYTES", 200 * 1024 * 1024),
+        patch("src.scrapers.youtube.ytdlp_info", new=AsyncMock(return_value=seventy_mb)),
+        patch("src.scrapers.youtube.ytdlp_download", new=AsyncMock(return_value=ok)) as download,
+    ):
+        result = await scraper._primary_extract("https://youtu.be/bigvideo")
+
+    download.assert_awaited_once()
+    assert result.media_items[0].data == b"video-bytes"

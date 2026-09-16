@@ -62,7 +62,9 @@ Optional:
 - `TWITTER_BEARER_TOKEN` — for Twitter API access
 - `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` — for Reddit API access
 - `COOKIES_FILE` — path to a cookies.txt file for authenticated scraping (Instagram, Facebook)
-- `MAX_FILE_SIZE_MB` — max file size to download (default: 50)
+- `MAX_FILE_SIZE_MB` — Telegram send cap; media still above it after compression is dropped (default: 50)
+- `MAX_DOWNLOAD_SIZE_MB` — ceiling on what gets downloaded for compression (default: 200)
+- `MIN_VIDEO_BITRATE_KBPS` — quality floor for the auto-download re-encode; see [Video size handling](#video-size-handling) (default: 500)
 - `DOWNLOAD_TIMEOUT_SECONDS` — download timeout (default: 30)
 - `CONCURRENT_DOWNLOADS` — max parallel downloads (default: 3)
 - `LOG_LEVEL` — logging level (default: INFO)
@@ -133,6 +135,21 @@ docker compose up -d --build
 # Stop the bot
 docker compose down
 ```
+
+### Video size handling
+
+Videos go through a two-tier ffmpeg pipeline before being sent:
+
+1. Anything above ~10 MB (`AUTO_DOWNLOAD_LIMIT_MB`) is re-encoded to fit 10 MB so Telegram
+   clients auto-download it — first at 720p, then at 480p — but only while the video bitrate
+   stays above `MIN_VIDEO_BITRATE_KBPS` (60% of it for the 480p pass).
+2. If fitting 10 MB would breach that floor (long clips), the video is instead encoded to fit
+   `MAX_FILE_SIZE_MB` at 720p — a bigger file that still looks good beats a tiny blurry one.
+   Originals already under the cap are sent untouched.
+
+Anything still above `MAX_FILE_SIZE_MB` after both tiers is dropped and the chat is told the
+media is too large. `MAX_DOWNLOAD_SIZE_MB` bounds how much is pulled into memory for this in
+the first place.
 
 ### Authenticated Scraping
 

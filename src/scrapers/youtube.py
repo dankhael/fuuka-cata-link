@@ -15,7 +15,7 @@ from src.utils.ytdlp import YtdlpResult, expected_filesize, ytdlp_download, ytdl
 logger = structlog.get_logger()
 
 _MAX_YOUTUBE_DURATION_SECONDS = 318
-_MAX_BYTES = settings.max_file_size_mb * 1024 * 1024
+_MAX_BYTES = settings.max_download_size_mb * 1024 * 1024
 
 T = TypeVar("T")
 
@@ -48,7 +48,8 @@ class YouTubeScraper(BaseScraper):
         # surface as data=None and reach the chat as an extraction error.
         if result.exceeds_size_limit:
             raise SkipExtraction(
-                f"youtube video exceeds the {settings.max_file_size_mb}MB send cap for {url!r}"
+                f"youtube video exceeds the {settings.max_download_size_mb}MB download cap "
+                f"for {url!r}"
             )
 
         if not result.data:
@@ -97,11 +98,13 @@ class YouTubeScraper(BaseScraper):
 
         # Size may legitimately be unknown; the download enforces the cap itself
         # (--max-filesize + the post-download check), and skips just as quietly.
+        # This is the *download* ceiling: anything under it that is still over
+        # Telegram's send cap gets re-encoded by media_handler before sending.
         size = expected_filesize(info)
         if size and size > _MAX_BYTES:
             raise SkipExtraction(
-                f"youtube filesize {size / 1024 / 1024:.0f}MB exceeds cap "
-                f"{settings.max_file_size_mb}MB for {url!r}"
+                f"youtube filesize {size / 1024 / 1024:.0f}MB exceeds download cap "
+                f"{settings.max_download_size_mb}MB for {url!r}"
             )
 
     async def _download_with_proxy_fallback(self, url: str) -> YtdlpResult:

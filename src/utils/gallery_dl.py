@@ -94,7 +94,9 @@ async def gallery_dl_download(
 
         for media_file in media_files:
             file_size = media_file.stat().st_size
-            if file_size > settings.max_file_size_mb * 1024 * 1024:
+            # Only the download ceiling applies here; fitting Telegram's send
+            # cap is media_handler.ensure_within_limit's job (ffmpeg re-encode).
+            if file_size > settings.max_download_size_mb * 1024 * 1024:
                 logger.warning(
                     "gallery_dl_file_too_large",
                     size_mb=round(file_size / 1024 / 1024, 1),
