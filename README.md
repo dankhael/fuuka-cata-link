@@ -65,6 +65,7 @@ Optional:
 - `MAX_FILE_SIZE_MB` — Telegram send cap; media still above it after compression is dropped (default: 50)
 - `MAX_DOWNLOAD_SIZE_MB` — ceiling on what gets downloaded for compression (default: 200)
 - `MIN_VIDEO_BITRATE_KBPS` — quality floor for the auto-download re-encode; see [Video size handling](#video-size-handling) (default: 500)
+- `VIDEO_ENCODE_PRESET` — x264 preset for the re-encode (default: `veryfast`; `medium` is slower and marginally sharper)
 - `DOWNLOAD_TIMEOUT_SECONDS` — download timeout (default: 30)
 - `CONCURRENT_DOWNLOADS` — max parallel downloads (default: 3)
 - `LOG_LEVEL` — logging level (default: INFO)
@@ -150,6 +151,11 @@ Videos go through a two-tier ffmpeg pipeline before being sent:
 Anything still above `MAX_FILE_SIZE_MB` after both tiers is dropped and the chat is told the
 media is too large. `MAX_DOWNLOAD_SIZE_MB` bounds how much is pulled into memory for this in
 the first place.
+
+The encoder never upscales: a 480p source stays 480p, so the bitrate budget goes to real
+pixels. `VIDEO_ENCODE_PRESET` picks the x264 speed/quality trade-off — on the production VPS
+(2 vCPUs) compression was ~46% of all request time, and `veryfast` cuts it by ~40% at the same
+output size.
 
 ### Authenticated Scraping
 
