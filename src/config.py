@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     # for fitting max_file_size_mb instead: a bigger, watchable file beats a
     # tiny blurry one.
     min_video_bitrate_kbps: int = 500
+    # x264 speed/quality trade-off for the re-encode. The VPS has 2 vCPUs and
+    # compression was 46% of all request time (median 34s); veryfast encodes
+    # ~1.6x faster than medium at the same target bitrate for a ~0.1% SSIM
+    # loss, so it is the default. Set to "medium" to get the old behaviour.
+    video_encode_preset: str = "veryfast"
     download_timeout_seconds: int = 30
     # Hard wall-clock ceiling per yt-dlp invocation. yt-dlp's own retries/socket
     # timeouts can stack into multi-minute hangs over a flaky proxy (DAN-80);

@@ -140,17 +140,30 @@ def target_video_bitrate(target_bytes: int, duration_seconds: float) -> int:
     return int(((target_bytes * 8) / duration_seconds - audio_bps) * 0.9)
 
 
+def scale_filter(max_height: int) -> str:
+    """ffmpeg scale filter capping the height at *max_height* without upscaling.
+
+    A fixed ``scale=-2:720`` used to inflate 480p/540p sources to 720p, which
+    costs encode time and spends the bitrate budget on invented pixels. The
+    height is rounded down to even because libx264 rejects odd dimensions.
+
+    >>> scale_filter(720)
+    "scale=-2:'2*trunc(min(720,ih)/2)'"
+    """
+    return f"scale=-2:'2*trunc(min({max_height},ih)/2)'"
+
+
 async def compress_video(
     data: bytes,
     target_bytes: int,
-    scale: str = "-2:720",
+    max_height: int = 720,
     min_video_bps: int = _ABSOLUTE_MIN_VIDEO_BPS,
 ) -> bytes | None:
     """Re-encode video to fit within *target_bytes* using ffmpeg.
 
     Returns compressed bytes, or None if compression fails or the bitrate
     needed to hit the target falls below *min_video_bps* (the caller's
-    quality floor). *scale* is the ffmpeg scale filter value (e.g. "-2:720").
+    quality floor). Output height is capped at *max_height* (never upscaled).
     """
     tmp_dir = tempfile.mkdtemp(prefix="compress_")
     try:
@@ -169,7 +182,7 @@ async def compress_video(
                 "compress_video_bitrate_too_low",
                 target_bps=target_video_bps,
                 floor_bps=min_video_bps,
-                scale=scale,
+                max_height=max_height,
                 target_mb=_mb(target_bytes),
             )
             return None
@@ -182,6 +195,8 @@ async def compress_video(
             str(input_path),
             "-c:v",
             "libx264",
+            "-preset",
+            settings.video_encode_preset,
             "-b:v",
             str(target_video_bps),
             "-maxrate",
@@ -189,7 +204,7 @@ async def compress_video(
             "-bufsize",
             str(target_video_bps * 2),
             "-vf",
-            f"scale={scale}",
+            scale_filter(max_height),
             "-c:a",
             "aac",
             "-b:a",
@@ -211,7 +226,7 @@ async def compress_video(
             "video_compressed",
             original_mb=_mb(len(data)),
             compressed_mb=_mb(len(result)),
-            scale=scale,
+            max_height=max_height,
             duration_ms=int((time.monotonic() - ffmpeg_start) * 1000),
         )
         return result
@@ -222,14 +237,14 @@ async def compress_video(
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def _soft_passes() -> list[tuple[str, int]]:
-    """(scale, bitrate floor) attempts for the auto-download target, in order.
+def _soft_passes() -> list[tuple[int, int]]:
+    """(max height, bitrate floor) attempts for the auto-download target, in order.
 
     480p has ~44% of 720p's pixels, so 60% of the 720p floor still gives it
     more bits per pixel — the second pass rescues clips the first can't.
     """
     floor_720p = settings.min_video_bitrate_kbps * 1000
-    return [("-2:720", floor_720p), ("-2:480", int(floor_720p * 0.6))]
+    return [(720, floor_720p), (480, int(floor_720p * 0.6))]
 
 
 async def _shrink_video(data: bytes, soft_limit: int, hard_limit: int) -> bytes:
@@ -242,10 +257,12 @@ async def _shrink_video(data: bytes, soft_limit: int, hard_limit: int) -> bytes:
     still looks good beats a tiny blurry one. Returns the original when
     nothing improved on it; the caller drops what is still over the cap.
     """
-    for scale, floor_bps in _soft_passes():
-        if scale != "-2:720":
+    for max_height, floor_bps in _soft_passes():
+        if max_height != 720:
             logger.info("compress_video_retry_480p", original_mb=_mb(len(data)))
-        compressed = await compress_video(data, soft_limit, scale=scale, min_video_bps=floor_bps)
+        compressed = await compress_video(
+            data, soft_limit, max_height=max_height, min_video_bps=floor_bps
+        )
         if compressed and len(compressed) <= soft_limit:
             return compressed
 
@@ -258,7 +275,7 @@ async def _shrink_video(data: bytes, soft_limit: int, hard_limit: int) -> bytes:
         return data
 
     logger.info("compress_video_retry_send_cap", original_mb=_mb(len(data)), cap_mb=_mb(hard_limit))
-    compressed = await compress_video(data, hard_limit, scale="-2:720")
+    compressed = await compress_video(data, hard_limit, max_height=720)
     if compressed and len(compressed) < len(data):
         return compressed
     return data

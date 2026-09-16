@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,6 +12,7 @@ from src.utils.media_handler import (
     compress_video,
     download_media,
     ensure_within_limit,
+    scale_filter,
     target_video_bitrate,
 )
 
@@ -60,6 +62,7 @@ def caps():
         cfg.concurrent_downloads = 3
         cfg.download_timeout_seconds = 5
         cfg.min_video_bitrate_kbps = 500
+        cfg.video_encode_preset = "veryfast"
         yield cfg
 
 
@@ -127,6 +130,42 @@ async def test_compress_video_refuses_target_below_floor():
     ffmpeg.assert_not_awaited()
 
 
+def test_scale_filter_never_upscales_and_keeps_height_even():
+    assert scale_filter(720) == "scale=-2:'2*trunc(min(720,ih)/2)'"
+
+
+class FakeFfmpeg:
+    """Records the ffmpeg argv and writes a small output file where asked."""
+
+    def __init__(self) -> None:
+        self.argv: list[str] = []
+
+    async def __call__(self, *argv: str, **kwargs) -> AsyncMock:
+        self.argv = list(argv)
+        Path(argv[-1]).write_bytes(b"o" * 1024)
+        proc = AsyncMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"", b""))
+        return proc
+
+
+@pytest.mark.asyncio
+async def test_compress_video_uses_configured_preset_and_no_upscale_filter(caps):
+    """Compression was 46% of all request time on a 2-vCPU box; the preset and
+    the no-upscale filter are the two knobs that cut it without changing the
+    output size."""
+    ffmpeg = FakeFfmpeg()
+    with (
+        patch.object(media_handler, "_get_video_duration", new=AsyncMock(return_value=30.0)),
+        patch.object(media_handler.asyncio, "create_subprocess_exec", new=ffmpeg),
+    ):
+        result = await compress_video(b"x" * MB, 10 * MB, max_height=480)
+
+    assert result == b"o" * 1024
+    assert ffmpeg.argv[ffmpeg.argv.index("-preset") + 1] == "veryfast"
+    assert ffmpeg.argv[ffmpeg.argv.index("-vf") + 1] == scale_filter(480)
+
+
 # ---------------------------------------------------------------------------
 # _shrink_video: two-tier policy
 # ---------------------------------------------------------------------------
@@ -136,15 +175,15 @@ class FakeCompressor:
     """Stands in for compress_video; answers each (target, scale) from a table
     and records the calls so tests can assert on the pass order."""
 
-    def __init__(self, outcomes: dict[tuple[int, str], bytes | None]) -> None:
+    def __init__(self, outcomes: dict[tuple[int, int], bytes | None]) -> None:
         self._outcomes = outcomes
-        self.calls: list[tuple[int, str, int]] = []
+        self.calls: list[tuple[int, int, int]] = []
 
     async def __call__(
-        self, data: bytes, target_bytes: int, scale: str = "-2:720", min_video_bps: int = 0
+        self, data: bytes, target_bytes: int, max_height: int = 720, min_video_bps: int = 0
     ) -> bytes | None:
-        self.calls.append((target_bytes, scale, min_video_bps))
-        return self._outcomes.get((target_bytes, scale))
+        self.calls.append((target_bytes, max_height, min_video_bps))
+        return self._outcomes.get((target_bytes, max_height))
 
 
 SOFT = 10 * MB
@@ -153,22 +192,22 @@ HARD = 50 * MB
 
 @pytest.mark.asyncio
 async def test_shrink_uses_720p_soft_pass_when_it_fits(caps):
-    compressor = FakeCompressor({(SOFT, "-2:720"): b"s" * 9 * MB})
+    compressor = FakeCompressor({(SOFT, 720): b"s" * 9 * MB})
     with patch.object(media_handler, "compress_video", new=compressor):
         result = await _shrink_video(b"v" * 40 * MB, SOFT, HARD)
 
     assert len(result) == 9 * MB
-    assert [c[:2] for c in compressor.calls] == [(SOFT, "-2:720")]
+    assert [c[:2] for c in compressor.calls] == [(SOFT, 720)]
 
 
 @pytest.mark.asyncio
 async def test_shrink_passes_a_lower_floor_to_the_480p_pass(caps):
-    compressor = FakeCompressor({(SOFT, "-2:480"): b"s" * 9 * MB})
+    compressor = FakeCompressor({(SOFT, 480): b"s" * 9 * MB})
     with patch.object(media_handler, "compress_video", new=compressor):
         result = await _shrink_video(b"v" * 40 * MB, SOFT, HARD)
 
     assert len(result) == 9 * MB
-    assert compressor.calls == [(SOFT, "-2:720", 500_000), (SOFT, "-2:480", 300_000)]
+    assert compressor.calls == [(SOFT, 720, 500_000), (SOFT, 480, 300_000)]
 
 
 @pytest.mark.asyncio
@@ -187,15 +226,15 @@ async def test_shrink_keeps_original_under_send_cap_when_floor_blocks_soft_targe
 async def test_shrink_falls_back_to_send_cap_for_oversized_original(caps):
     """Regression for the 80MB Twitter videos: when 10MB would breach the
     floor, aim at the 50MB send cap instead of dropping the video."""
-    compressor = FakeCompressor({(HARD, "-2:720"): b"s" * 45 * MB})
+    compressor = FakeCompressor({(HARD, 720): b"s" * 45 * MB})
     with patch.object(media_handler, "compress_video", new=compressor):
         result = await _shrink_video(b"v" * 80 * MB, SOFT, HARD)
 
     assert len(result) == 45 * MB
     assert [c[:2] for c in compressor.calls] == [
-        (SOFT, "-2:720"),
-        (SOFT, "-2:480"),
-        (HARD, "-2:720"),
+        (SOFT, 720),
+        (SOFT, 480),
+        (HARD, 720),
     ]
 
 
