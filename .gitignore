@@ -28,4 +28,5 @@ htmlcov/
 downloads/
 cookies.txt
 benchmarks_output/
-logs-from-vps/
+logs-from-vps/# Any browser cookie export (e.g. www.youtube.com_cookies.txt), not just the merged jar
+*cookies*.txt

@@ -12,6 +12,20 @@ from src.utils.link_detector import Platform
 logger = structlog.get_logger()
 
 
+def describe_exception(exc: BaseException) -> str:
+    """``str(exc)``, falling back to the class name when the message is empty.
+
+    ``asyncio.TimeoutError`` and friends stringify to "", which left the
+    extraction_method_failed log with a blank error and nothing to grep for.
+
+    >>> describe_exception(TimeoutError())
+    'TimeoutError'
+    >>> describe_exception(RuntimeError("boom"))
+    'boom'
+    """
+    return str(exc) or type(exc).__name__
+
+
 class SkipExtraction(Exception):
     """Signal that a link should be ignored entirely (no reply, no fallback).
 
@@ -102,7 +116,7 @@ class BaseScraper(ABC):
                     url=url,
                     method=method_name,
                     duration_ms=duration_ms,
-                    error=str(exc),
+                    error=describe_exception(exc),
                 )
 
         logger.error("all_extraction_methods_failed", platform=self.platform, url=url)

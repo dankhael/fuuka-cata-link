@@ -61,7 +61,7 @@ Optional:
 - `ALLOWED_CHATS` — comma-separated chat IDs to restrict the bot to specific groups
 - `TWITTER_BEARER_TOKEN` — for Twitter API access
 - `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` — for Reddit API access
-- `COOKIES_FILE` — path to a cookies.txt file for authenticated scraping (Instagram, Facebook)
+- `COOKIES_FILE` — path to a cookies.txt file for authenticated scraping (Instagram, Facebook, YouTube — see [docs/youtube-cookies.md](docs/youtube-cookies.md))
 - `MAX_FILE_SIZE_MB` — Telegram send cap; media still above it after compression is dropped (default: 50)
 - `MAX_DOWNLOAD_SIZE_MB` — ceiling on what gets downloaded for compression (default: 200)
 - `MIN_VIDEO_BITRATE_KBPS` — quality floor for the auto-download re-encode; see [Video size handling](#video-size-handling) (default: 500)
@@ -153,12 +153,15 @@ the first place.
 
 ### Authenticated Scraping
 
-Some platforms (Instagram, Facebook) require cookies for reliable extraction. To enable this:
+Some platforms (Instagram, Facebook, YouTube) require cookies for reliable extraction. To enable this:
 
 1. Export cookies from your browser using a browser extension (e.g. "Get cookies.txt LOCALLY")
 2. Save the file as `cookies.txt` in the project root
 3. Uncomment the cookies volume mount in `docker-compose.yml`
 4. Set `COOKIES_FILE=/app/cookies.txt` in your `.env`
+
+YouTube rotates account cookies aggressively; [docs/youtube-cookies.md](docs/youtube-cookies.md)
+has the export procedure that survives it, and how to verify the jar on the VPS.
 
 ## Development
 

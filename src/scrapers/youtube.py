@@ -112,7 +112,10 @@ class YouTubeScraper(BaseScraper):
         return await self._with_proxy_fallback(url, runner)
 
     async def _info_with_proxy_fallback(self, url: str) -> dict:
-        return await self._with_proxy_fallback(url, ytdlp_info)
+        # Same cookies as the download: without them the probe hit the bot-gate
+        # on every single YouTube link while the download would have passed.
+        runner = functools.partial(ytdlp_info, cookies_file=settings.cookies_file)
+        return await self._with_proxy_fallback(url, runner)
 
     async def _with_proxy_fallback(self, url: str, run: Callable[..., Awaitable[T]]) -> T:
         """Run *run*(url, proxy=...) through the residential proxy, falling back

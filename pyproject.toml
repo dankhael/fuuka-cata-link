@@ -10,7 +10,9 @@ requires-python = ">=3.11"
 dependencies = [
     "aiogram>=3.13",
     "aiohttp>=3.10",
-    "yt-dlp>=2024.0",
+    # curl-cffi extra: yt-dlp's TikTok extractor needs a browser impersonation
+    # target, and without it the fallback is dead on arrival.
+    "yt-dlp[curl-cffi]>=2024.0",
     "Pillow>=10.0",
     "structlog>=24.0",
     "pydantic>=2.0",
