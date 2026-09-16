@@ -49,8 +49,19 @@ class Settings(BaseSettings):
     ytdlp_js_runtime: str | None = None  # e.g. "deno", "nodejs", "deno:/path/to/deno"
 
     # Performance
+    # Telegram's upload cap for bots. Anything still above it after compression
+    # is dropped instead of sent — the API would reject it with an error anyway.
     max_file_size_mb: int = 50
+    # Ceiling on what we pull into memory *before* compression. Twitter and
+    # Instagram videos routinely land at 60–80MB and used to be dropped as
+    # media_too_large even though ffmpeg shrinks them to ~10MB just fine.
+    max_download_size_mb: int = 200
     auto_download_limit_mb: int = 10  # Compress media above this to ensure Telegram auto-downloads
+    # Quality floor (video bitrate at 720p) for the auto-download re-encode.
+    # Below it a 10MB target turns long videos to mush, so the encoder settles
+    # for fitting max_file_size_mb instead: a bigger, watchable file beats a
+    # tiny blurry one.
+    min_video_bitrate_kbps: int = 500
     download_timeout_seconds: int = 30
     # Hard wall-clock ceiling per yt-dlp invocation. yt-dlp's own retries/socket
     # timeouts can stack into multi-minute hangs over a flaky proxy (DAN-80);

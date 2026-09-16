@@ -35,8 +35,9 @@ class YtdlpResult:
     is_video: bool = True
     is_animation: bool = False  # True for GIFs
     duration: float | None = None  # seconds
-    # True when the media was dropped for exceeding MAX_FILE_SIZE_MB (either
+    # True when the media was dropped for exceeding MAX_DOWNLOAD_SIZE_MB (either
     # yt-dlp aborted on --max-filesize or the merged file came out over it).
+    # The Telegram send cap is enforced later, after compression.
     # Lets callers tell "too big to send" apart from a genuine failure.
     exceeds_size_limit: bool = False
 
@@ -145,7 +146,7 @@ async def ytdlp_download(
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         output_template = str(Path(tmpdir) / "media.%(ext)s")
-        max_size = f"{settings.max_file_size_mb}M"
+        max_size = f"{settings.max_download_size_mb}M"
         format_spec = f"bv*+ba[filesize<{max_size}]/bv*+ba/b[filesize<{max_size}]/b"
         cmd = [
             "yt-dlp",
@@ -155,7 +156,7 @@ async def ytdlp_download(
             "-f",
             format_spec,
             "--max-filesize",
-            f"{settings.max_file_size_mb}M",
+            max_size,
             "--write-info-json",
             "--remote-components",
             "ejs:github",
@@ -197,7 +198,7 @@ async def ytdlp_download(
         if info_files:
             info = json.loads(info_files[0].read_text(encoding="utf-8"))
 
-        limit_bytes = settings.max_file_size_mb * 1024 * 1024
+        limit_bytes = settings.max_download_size_mb * 1024 * 1024
         data: bytes | None = None
         ext = "mp4"
         exceeds_size_limit = False

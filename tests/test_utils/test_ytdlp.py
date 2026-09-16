@@ -95,3 +95,34 @@ async def test_download_without_media_is_not_flagged_as_oversized():
 
     assert not result.exceeds_size_limit
     assert result.data is None
+
+
+class FakeRecordingRun:
+    """Captures the yt-dlp argv and leaves a small media file behind."""
+
+    def __init__(self) -> None:
+        self.cmd: list[str] = []
+
+    async def __call__(self, cmd: list[str], *, what: str) -> tuple[int, bytes, bytes]:
+        self.cmd = cmd
+        outdir = Path(cmd[cmd.index("-o") + 1]).parent
+        (outdir / "media.mp4").write_bytes(b"v" * 1024)
+        return 0, b"", b""
+
+
+@pytest.mark.asyncio
+async def test_download_caps_yt_dlp_at_the_download_ceiling_not_the_send_cap():
+    """Regression: --max-filesize used to be the 50MB Telegram cap, so yt-dlp
+    aborted on every 60–80MB video that ffmpeg could have shrunk."""
+    run = FakeRecordingRun()
+    with patch("src.utils.ytdlp._run_ytdlp", new=run), patch("src.utils.ytdlp.settings") as cfg:
+        cfg.max_download_size_mb = 200
+        cfg.max_file_size_mb = 50
+        cfg.download_timeout_seconds = 30
+        cfg.cookies_from_browser = None
+        cfg.ytdlp_js_runtime = None
+        result = await ytdlp_download("https://youtu.be/anyvideo")
+
+    assert result.data == b"v" * 1024
+    assert run.cmd[run.cmd.index("--max-filesize") + 1] == "200M"
+    assert "50M" not in " ".join(run.cmd)

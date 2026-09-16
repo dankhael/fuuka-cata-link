@@ -167,3 +167,49 @@ async def test_gallery_dl_multiple_files():
 
     assert len(result.files) == 3
     assert all(not f.is_video for f in result.files)
+
+
+@pytest.mark.asyncio
+async def test_gallery_dl_keeps_files_over_send_cap_but_under_download_cap():
+    """Regression: 70MB Instagram reels were dropped here as too large, which
+    then cascaded into the embed fallback finding nothing. Only the download
+    ceiling applies at this stage; compression happens before sending."""
+
+    async def fake_subprocess(*cmd, **kwargs):
+        from pathlib import Path
+
+        dest_path = Path(cmd[2])
+        dest_path.mkdir(parents=True, exist_ok=True)
+        (dest_path / "reel.mp4").write_bytes(b"x" * 70 * 1024 * 1024)
+
+        return _make_process(0)
+
+    with (
+        patch("src.utils.gallery_dl.asyncio.create_subprocess_exec", side_effect=fake_subprocess),
+        patch("src.utils.gallery_dl.settings") as cfg,
+    ):
+        cfg.max_download_size_mb = 200
+        result = await gallery_dl_download("https://instagram.com/reel/BIG/")
+
+    assert len(result.files) == 1
+    assert result.files[0].is_video is True
+
+
+@pytest.mark.asyncio
+async def test_gallery_dl_skips_files_over_download_cap():
+    async def fake_subprocess(*cmd, **kwargs):
+        from pathlib import Path
+
+        dest_path = Path(cmd[2])
+        dest_path.mkdir(parents=True, exist_ok=True)
+        (dest_path / "huge.mp4").write_bytes(b"x" * 3 * 1024 * 1024)
+
+        return _make_process(0)
+
+    with (
+        patch("src.utils.gallery_dl.asyncio.create_subprocess_exec", side_effect=fake_subprocess),
+        patch("src.utils.gallery_dl.settings") as cfg,
+    ):
+        cfg.max_download_size_mb = 2
+        with pytest.raises(RuntimeError, match="no usable media"):
+            await gallery_dl_download("https://instagram.com/reel/HUGE/")

@@ -263,11 +263,18 @@ async def _send_single_result(
     else:
         newly_downloaded = []
 
-    downloaded = items_already_downloaded + newly_downloaded
+    fetched = items_already_downloaded + newly_downloaded
     downloaded = await ensure_within_limit(
-        downloaded, settings.auto_download_limit_mb * 1024 * 1024
+        fetched,
+        settings.auto_download_limit_mb * 1024 * 1024,
+        hard_limit_bytes=settings.max_file_size_mb * 1024 * 1024,
     )
 
+    if fetched and not downloaded:
+        await message.reply(
+            "A mídia deste link é grande demais para eu enviar pelo Telegram, mesmo comprimida."
+        )
+        return None
     if not downloaded:
         await message.reply("Não consegui fazer o download da mídia deste link.")
         return None

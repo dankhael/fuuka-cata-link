@@ -328,3 +328,32 @@ async def test_skip_extraction_results_in_no_reply():
     send.assert_not_awaited()
     message.reply.assert_not_awaited()
     message.answer.assert_not_awaited()
+
+
+async def test_send_single_result_reports_media_too_large_when_compression_cannot_fit():
+    """When every item is dropped for still exceeding the Telegram send cap the
+    chat gets a size-specific message, not the generic download failure."""
+    message = AsyncMock()
+    result = _result()
+    result.media_items[0].data = b"x" * 10
+
+    with patch.object(handlers, "ensure_within_limit", AsyncMock(return_value=[])):
+        sent = await handlers._send_single_result(message, result)
+
+    assert sent is None
+    message.reply.assert_awaited_once()
+    assert "grande demais" in message.reply.await_args.args[0]
+
+
+async def test_send_single_result_reports_download_failure_when_nothing_fetched():
+    message = AsyncMock()
+    result = _result()  # item without data → must be downloaded
+
+    with (
+        patch.object(handlers, "download_media", AsyncMock(return_value=[])),
+        patch.object(handlers, "ensure_within_limit", AsyncMock(return_value=[])),
+    ):
+        sent = await handlers._send_single_result(message, result)
+
+    assert sent is None
+    assert "download" in message.reply.await_args.args[0]

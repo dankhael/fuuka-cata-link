@@ -17,7 +17,17 @@ from src.scrapers.base import MediaItem, MediaType
 
 logger = structlog.get_logger()
 
-_MAX_BYTES = settings.max_file_size_mb * 1024 * 1024
+# Absolute floor for any re-encode; below this nothing is watchable regardless
+# of resolution, so the encoder gives up rather than produce garbage.
+_ABSOLUTE_MIN_VIDEO_BPS = 100_000
+
+
+def _download_cap_bytes() -> int:
+    return settings.max_download_size_mb * 1024 * 1024
+
+
+def _mb(size_bytes: int) -> float:
+    return round(size_bytes / 1024 / 1024, 1)
 
 
 async def download_media(
@@ -26,13 +36,16 @@ async def download_media(
 ) -> list[MediaItem]:
     """Download media items concurrently and populate their `data` field.
 
-    Items exceeding MAX_FILE_SIZE_MB are skipped with a warning.
+    Items exceeding MAX_DOWNLOAD_SIZE_MB are skipped with a warning — before
+    the transfer when the server announces a Content-Length, after it
+    otherwise. Fitting the Telegram send cap is `ensure_within_limit`'s job.
     """
     own_session = session is None
     if own_session:
         session = aiohttp.ClientSession()
 
     sem = asyncio.Semaphore(settings.concurrent_downloads)
+    cap = _download_cap_bytes()
 
     async def _fetch(item: MediaItem) -> None:
         async with sem:
@@ -42,13 +55,13 @@ async def download_media(
                     timeout=aiohttp.ClientTimeout(total=settings.download_timeout_seconds),
                 ) as resp:
                     resp.raise_for_status()
+                    announced = resp.content_length
+                    if announced is not None and announced > cap:
+                        logger.warning("media_too_large", url=item.url, size_mb=_mb(announced))
+                        return
                     data = await resp.read()
-                    if len(data) > _MAX_BYTES:
-                        logger.warning(
-                            "media_too_large",
-                            url=item.url,
-                            size_mb=round(len(data) / 1024 / 1024, 1),
-                        )
+                    if len(data) > cap:
+                        logger.warning("media_too_large", url=item.url, size_mb=_mb(len(data)))
                         return
                     item.data = data
             except Exception as exc:
@@ -114,11 +127,30 @@ async def _get_video_duration(path: Path) -> float:
     return float(info["format"]["duration"])
 
 
-async def compress_video(data: bytes, target_bytes: int, scale: str = "-2:720") -> bytes | None:
+def target_video_bitrate(target_bytes: int, duration_seconds: float) -> int:
+    """Video bitrate (bps) that lands a *duration_seconds* clip at *target_bytes*.
+
+    Leaves 128kbps for audio and applies a 0.9 safety factor so container
+    overhead and rate-control overshoot don't push the file over the target.
+
+    >>> target_video_bitrate(10 * 1024 * 1024, 60)
+    1143091
+    """
+    audio_bps = 128_000
+    return int(((target_bytes * 8) / duration_seconds - audio_bps) * 0.9)
+
+
+async def compress_video(
+    data: bytes,
+    target_bytes: int,
+    scale: str = "-2:720",
+    min_video_bps: int = _ABSOLUTE_MIN_VIDEO_BPS,
+) -> bytes | None:
     """Re-encode video to fit within *target_bytes* using ffmpeg.
 
-    Returns compressed bytes, or None if compression fails.
-    *scale* is the ffmpeg scale filter value (e.g. "-2:720" for 720p).
+    Returns compressed bytes, or None if compression fails or the bitrate
+    needed to hit the target falls below *min_video_bps* (the caller's
+    quality floor). *scale* is the ffmpeg scale filter value (e.g. "-2:720").
     """
     tmp_dir = tempfile.mkdtemp(prefix="compress_")
     try:
@@ -131,11 +163,15 @@ async def compress_video(data: bytes, target_bytes: int, scale: str = "-2:720") 
             logger.warning("compress_video_bad_duration", duration=duration)
             return None
 
-        # Target bitrate: leave 128kbps headroom for audio, apply 0.9 safety factor
-        audio_bps = 128_000
-        target_video_bps = int(((target_bytes * 8) / duration - audio_bps) * 0.9)
-        if target_video_bps < 100_000:
-            logger.warning("compress_video_bitrate_too_low", target_bps=target_video_bps)
+        target_video_bps = target_video_bitrate(target_bytes, duration)
+        if target_video_bps < min_video_bps:
+            logger.info(
+                "compress_video_bitrate_too_low",
+                target_bps=target_video_bps,
+                floor_bps=min_video_bps,
+                scale=scale,
+                target_mb=_mb(target_bytes),
+            )
             return None
 
         ffmpeg_start = time.monotonic()
@@ -173,8 +209,8 @@ async def compress_video(data: bytes, target_bytes: int, scale: str = "-2:720") 
         result = output_path.read_bytes()
         logger.info(
             "video_compressed",
-            original_mb=round(len(data) / 1024 / 1024, 1),
-            compressed_mb=round(len(result) / 1024 / 1024, 1),
+            original_mb=_mb(len(data)),
+            compressed_mb=_mb(len(result)),
             scale=scale,
             duration_ms=int((time.monotonic() - ffmpeg_start) * 1000),
         )
@@ -186,48 +222,81 @@ async def compress_video(data: bytes, target_bytes: int, scale: str = "-2:720") 
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-async def ensure_within_limit(items: list[MediaItem], limit_bytes: int) -> list[MediaItem]:
-    """Compress media items that exceed *limit_bytes*.
+def _soft_passes() -> list[tuple[str, int]]:
+    """(scale, bitrate floor) attempts for the auto-download target, in order.
 
-    - Videos/animations are re-encoded via ffmpeg (720p, then 480p fallback).
+    480p has ~44% of 720p's pixels, so 60% of the 720p floor still gives it
+    more bits per pixel — the second pass rescues clips the first can't.
+    """
+    floor_720p = settings.min_video_bitrate_kbps * 1000
+    return [("-2:720", floor_720p), ("-2:480", int(floor_720p * 0.6))]
+
+
+async def _shrink_video(data: bytes, soft_limit: int, hard_limit: int) -> bytes:
+    """Best re-encode of *data* under the two-tier size policy.
+
+    Tier 1 aims at *soft_limit* (Telegram's auto-download threshold) at 720p,
+    then 480p, but only while the bitrate stays above the quality floor.
+    Tier 2 runs when the floor blocked tier 1 and the original is over
+    *hard_limit* (the send cap): aim at the cap at 720p — a bigger file that
+    still looks good beats a tiny blurry one. Returns the original when
+    nothing improved on it; the caller drops what is still over the cap.
+    """
+    for scale, floor_bps in _soft_passes():
+        if scale != "-2:720":
+            logger.info("compress_video_retry_480p", original_mb=_mb(len(data)))
+        compressed = await compress_video(data, soft_limit, scale=scale, min_video_bps=floor_bps)
+        if compressed and len(compressed) <= soft_limit:
+            return compressed
+
+    if len(data) <= hard_limit:
+        logger.info(
+            "compress_video_kept_original",
+            original_mb=_mb(len(data)),
+            reason="soft target would breach the quality floor",
+        )
+        return data
+
+    logger.info("compress_video_retry_send_cap", original_mb=_mb(len(data)), cap_mb=_mb(hard_limit))
+    compressed = await compress_video(data, hard_limit, scale="-2:720")
+    if compressed and len(compressed) < len(data):
+        return compressed
+    return data
+
+
+async def ensure_within_limit(
+    items: list[MediaItem], limit_bytes: int, hard_limit_bytes: int | None = None
+) -> list[MediaItem]:
+    """Compress media items that exceed *limit_bytes*; drop what can't be sent.
+
+    - Videos/animations are re-encoded via ffmpeg (see `_shrink_video`).
     - Images are optimized via Pillow.
-    - If compression is unavailable or fails, the item is kept as-is.
+    - If compression is unavailable or fails, the item is kept as-is — unless
+      it is still over *hard_limit_bytes* (Telegram's send cap), in which case
+      it is dropped so the API call doesn't fail with a 413 later.
     """
     if limit_bytes <= 0:
         return items
+    hard_limit = hard_limit_bytes if hard_limit_bytes is not None else limit_bytes
 
     for item in items:
         if item.data is None or len(item.data) <= limit_bytes:
             continue
 
-        original_mb = round(len(item.data) / 1024 / 1024, 1)
+        original_mb = _mb(len(item.data))
 
         if item.media_type in (MediaType.VIDEO, MediaType.ANIMATION):
             if not _check_ffmpeg():
                 continue
-
-            # First pass: 720p
-            compressed = await compress_video(item.data, limit_bytes, scale="-2:720")
-            if compressed and len(compressed) <= limit_bytes:
-                item.data = compressed
-                continue
-
-            # Second pass: 480p
-            logger.info("compress_video_retry_480p", original_mb=original_mb)
-            compressed = await compress_video(item.data, limit_bytes, scale="-2:480")
-            if compressed and len(compressed) <= limit_bytes:
-                item.data = compressed
-                continue
-
-            # Use best result even if still over limit
-            if compressed and len(compressed) < len(item.data):
-                item.data = compressed
-            logger.warning(
-                "compress_video_still_over_limit",
-                original_mb=original_mb,
-                final_mb=round(len(item.data) / 1024 / 1024, 1),
-                limit_mb=round(limit_bytes / 1024 / 1024, 1),
-            )
+            item.data = await _shrink_video(item.data, limit_bytes, hard_limit)
+            if len(item.data) > limit_bytes:
+                # Expected outcome of tier 2 (quality floor won), not an error.
+                logger.info(
+                    "compress_video_still_over_limit",
+                    original_mb=original_mb,
+                    final_mb=_mb(len(item.data)),
+                    limit_mb=_mb(limit_bytes),
+                )
 
         elif item.media_type == MediaType.IMAGE:
             optimized = optimize_image(item.data)
@@ -241,10 +310,25 @@ async def ensure_within_limit(items: list[MediaItem], limit_bytes: int) -> list[
                 logger.warning(
                     "image_still_over_limit",
                     original_mb=original_mb,
-                    final_mb=round(len(item.data) / 1024 / 1024, 1),
+                    final_mb=_mb(len(item.data)),
                 )
 
-    return items
+    return _drop_unsendable(items, hard_limit)
+
+
+def _drop_unsendable(items: list[MediaItem], hard_limit: int) -> list[MediaItem]:
+    sendable: list[MediaItem] = []
+    for item in items:
+        if item.data is not None and len(item.data) > hard_limit:
+            logger.warning(
+                "media_too_large_to_send",
+                url=item.url,
+                size_mb=_mb(len(item.data)),
+                cap_mb=_mb(hard_limit),
+            )
+            continue
+        sendable.append(item)
+    return sendable
 
 
 def is_image(item: MediaItem) -> bool:

@@ -13,7 +13,9 @@ logger = structlog.get_logger()
 _TIKWM_API = "https://www.tikwm.com/api/"
 _TIKWM_TIMEOUT = aiohttp.ClientTimeout(total=15)
 _DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=settings.download_timeout_seconds)
-_MAX_BYTES = settings.max_file_size_mb * 1024 * 1024
+# Download ceiling, not the Telegram send cap: oversized videos are re-encoded
+# by media_handler.ensure_within_limit before sending.
+_MAX_BYTES = settings.max_download_size_mb * 1024 * 1024
 
 
 class TikTokScraper(BaseScraper):
