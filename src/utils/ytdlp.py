@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +16,7 @@ from pathlib import Path
 import structlog
 
 from src.config import settings
+from src.utils import cookie_jar
 from src.utils.proxy import redact_proxy_credentials
 
 logger = structlog.get_logger()
@@ -105,22 +105,20 @@ async def _run_ytdlp(cmd: list[str], *, what: str) -> tuple[int, bytes, bytes]:
     return proc.returncode or 0, stdout, stderr
 
 
-def _cookie_args(tmpdir: str, cookies_file: str | None) -> list[str]:
-    """yt-dlp auth flags for one invocation.
+async def _cookie_args(tmpdir: str, cookies_file: str | None) -> tuple[list[str], str | None]:
+    """yt-dlp auth flags for one invocation, plus the private jar to check in.
 
-    The cookie jar is copied into *tmpdir* because yt-dlp rewrites it with
-    rotated cookies on exit: writing into the read-only mounted original
-    fails, and two concurrent runs sharing one jar would race each other.
+    The jar is a per-run copy of the live jar (``cookie_jar.checkout``): yt-dlp
+    rewrites it with rotated cookies on exit, two concurrent runs must not
+    share one file, and the rotation has to be merged back afterwards or
+    YouTube invalidates the session within a few requests.
     """
-    if cookies_file:
-        cookies_dir = Path(tmpdir) / "_cookies"
-        cookies_dir.mkdir(exist_ok=True)
-        writable_cookies = str(cookies_dir / "cookies.txt")
-        shutil.copy2(cookies_file, writable_cookies)
-        return ["--cookies", writable_cookies]
+    private_jar = await cookie_jar.checkout(tmpdir, cookies_file)
+    if private_jar:
+        return ["--cookies", private_jar], private_jar
     if settings.cookies_from_browser:
-        return ["--cookies-from-browser", settings.cookies_from_browser]
-    return []
+        return ["--cookies-from-browser", settings.cookies_from_browser], None
+    return [], None
 
 
 async def ytdlp_info(
@@ -138,7 +136,8 @@ async def ytdlp_info(
     with tempfile.TemporaryDirectory() as tmpdir:
         cmd = ["yt-dlp", "--dump-json", "--no-download", "--remote-components", "ejs:github"]
         cmd.extend(_fast_fail_args())
-        cmd.extend(_cookie_args(tmpdir, cookies_file))
+        cookie_flags, private_jar = await _cookie_args(tmpdir, cookies_file)
+        cmd.extend(cookie_flags)
         if proxy:
             cmd.extend(["--proxy", proxy])
         if settings.ytdlp_js_runtime:
@@ -148,6 +147,8 @@ async def ytdlp_info(
         cmd.append(url)
 
         returncode, stdout, stderr = await _run_ytdlp(cmd, what="info")
+        if private_jar:
+            await cookie_jar.checkin(private_jar)
     if returncode != 0:
         raise RuntimeError(
             f"yt-dlp info failed: {redact_proxy_credentials(stderr.decode().strip())}"
@@ -192,7 +193,8 @@ async def ytdlp_download(
         ]
         # Cookies live in a subdirectory so yt-dlp's rewritten jar doesn't get
         # picked up as a downloaded media file below.
-        cmd.extend(_cookie_args(tmpdir, cookies_file))
+        cookie_flags, private_jar = await _cookie_args(tmpdir, cookies_file)
+        cmd.extend(cookie_flags)
         if proxy:
             cmd.extend(["--proxy", proxy])
         if settings.ytdlp_js_runtime:
@@ -202,6 +204,8 @@ async def ytdlp_download(
         cmd.append(url)
 
         returncode, stdout, stderr = await _run_ytdlp(cmd, what="download")
+        if private_jar:
+            await cookie_jar.checkin(private_jar)
 
         if returncode != 0:
             raise RuntimeError(

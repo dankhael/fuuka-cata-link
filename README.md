@@ -62,6 +62,7 @@ Optional:
 - `TWITTER_BEARER_TOKEN` — for Twitter API access
 - `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` — for Reddit API access
 - `COOKIES_FILE` — path to a cookies.txt file for authenticated scraping (Instagram, Facebook, YouTube — see [docs/youtube-cookies.md](docs/youtube-cookies.md))
+- `COOKIES_STATE_DIR` — writable, persistent dir for the live copy of the jar that yt-dlp rotates (default: `logs`)
 - `MAX_FILE_SIZE_MB` — Telegram send cap; media still above it after compression is dropped (default: 50)
 - `MAX_DOWNLOAD_SIZE_MB` — ceiling on what gets downloaded for compression (default: 200)
 - `MIN_VIDEO_BITRATE_KBPS` — quality floor for the auto-download re-encode; see [Video size handling](#video-size-handling) (default: 500)

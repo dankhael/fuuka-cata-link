@@ -28,5 +28,8 @@ htmlcov/
 downloads/
 cookies.txt
 benchmarks_output/
-logs-from-vps/# Any browser cookie export (e.g. www.youtube.com_cookies.txt), not just the merged jar
+logs-from-vps/
+# Any browser cookie export (e.g. www.youtube.com_cookies.txt), not just the merged jar
 *cookies*.txt
+# Live (rotated) cookie jar kept by src/utils/cookie_jar.py
+logs/*.live

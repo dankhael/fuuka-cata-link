@@ -139,8 +139,15 @@ class FakeInfoRun:
         return 0, json.dumps({"duration": 42}).encode(), b""
 
 
+@pytest.fixture
+def cookie_state_dir(tmp_path):
+    with patch("src.utils.cookie_jar.settings") as cfg:
+        cfg.cookies_state_dir = str(tmp_path / "state")
+        yield tmp_path / "state"
+
+
 @pytest.mark.asyncio
-async def test_info_probe_sends_a_writable_copy_of_the_cookie_jar(tmp_path):
+async def test_info_probe_sends_a_writable_copy_of_the_cookie_jar(tmp_path, cookie_state_dir):
     """Regression: the probe ran without cookies, so YouTube's bot-gate failed
     every link at the metadata step even when the download would have passed."""
     jar = tmp_path / "cookies.txt"
@@ -154,6 +161,43 @@ async def test_info_probe_sends_a_writable_copy_of_the_cookie_jar(tmp_path):
     passed_jar = Path(run.cmd[run.cmd.index("--cookies") + 1])
     assert passed_jar != jar, "yt-dlp rewrites the jar; the mounted original must stay untouched"
     assert passed_jar.name == "cookies.txt"
+
+
+class FakeRotatingRun:
+    """A yt-dlp run that, like the real one, saves rotated cookies into the
+    --cookies file it was handed before exiting."""
+
+    async def __call__(self, cmd: list[str], *, what: str) -> tuple[int, bytes, bytes]:
+        jar = Path(cmd[cmd.index("--cookies") + 1])
+        jar.write_text(
+            "# Netscape HTTP Cookie File\n"
+            ".youtube.com\tTRUE\t/\tTRUE\t2000000000\t__Secure-1PSIDTS\trotated\n"
+        )
+        return 0, json.dumps({"duration": 1}).encode(), b""
+
+
+@pytest.mark.asyncio
+async def test_rotated_cookies_survive_into_the_next_run(tmp_path, cookie_state_dir):
+    """Regression: the rotated jar was discarded with the temp dir, so the
+    mounted original went stale and YouTube reported the cookies as rotated."""
+    jar = tmp_path / "cookies.txt"
+    jar.write_text(
+        "# Netscape HTTP Cookie File\n"
+        ".youtube.com\tTRUE\t/\tTRUE\t2000000000\t__Secure-1PSIDTS\toriginal\n"
+    )
+    run = FakeInfoRun()
+
+    with patch("src.utils.ytdlp._run_ytdlp", new=FakeRotatingRun()):
+        await ytdlp_info("https://youtu.be/first", cookies_file=str(jar))
+    with patch("src.utils.ytdlp._run_ytdlp", new=run):
+        await ytdlp_info("https://youtu.be/second", cookies_file=str(jar))
+
+    handed_to_second_run = Path(run.cmd[run.cmd.index("--cookies") + 1])
+    # the second run's private copy was already deleted with its temp dir;
+    # the live jar is what it was copied from
+    assert "rotated" in (cookie_state_dir / "cookies.txt.live").read_text()
+    assert handed_to_second_run.name == "cookies.txt"
+    assert "original" in jar.read_text()
 
 
 @pytest.mark.asyncio

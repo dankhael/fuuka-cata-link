@@ -12,6 +12,9 @@ probe ran without cookies, which is why every YouTube link failed at the gate
 even with a valid jar mounted.
 
 > Cookies expire and YouTube rotates them; expect to redo this every few weeks.
+> The bot keeps up with the rotation on its own (see below) — what kills a jar is
+> **anything else** using the same session: the browser it was exported from, or
+> a manual `yt-dlp --cookies` test against a copy of the file.
 > For a set-and-forget setup see [the PO token provider](youtube-po-token.md),
 > which needs no cookies at all. The [residential proxy](youtube-residential-proxy.md)
 > is complementary: it changes *where* the request comes from, cookies change
@@ -46,6 +49,26 @@ ssh vps 'cd /root/fuuka-cata-link && docker compose restart telegram-bot'
 `.env` needs `COOKIES_FILE=/app/cookies.txt` and `docker-compose.yml` the
 `./cookies.txt:/app/cookies.txt:ro` mount — the deploy workflow re-enables the
 mount on every push, so a restart is enough after replacing the file.
+
+## How rotation is handled (and why you must not test with the jar)
+
+Google rotates `__Secure-1PSIDTS` / `__Secure-3PSIDTS` on every request and
+soon rejects the previous values. yt-dlp saves the rotated cookies into the
+`--cookies` file it was given, so the bot keeps a **live jar** at
+`$COOKIES_STATE_DIR/cookies.txt.live` (inside the persistent volume): each run
+works on a private copy of it and merges the rotation back afterwards
+(`src/utils/cookie_jar.py`). The mounted `cookies.txt` is never written to.
+
+Consequences:
+
+- A fresh export only needs to land on the mount with a newer mtime — the live
+  jar is re-seeded from it on the next run. `scp` (without `-p`) does that.
+- **Don't run `yt-dlp --cookies` by hand against a copy of the jar** to "check"
+  it. That copy rotates the session and the live jar is left holding dead
+  values. Check the bot's own logs instead (`media_extracted platform=youtube`).
+- The verification command below is the one exception: run it **once**, right
+  after installing a fresh export, and copy the jar back over the mount if you
+  do (`docker cp` the rotated file out), or simply re-export.
 
 ## Verify
 
