@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+import re
+
 from src.scrapers.base import ScrapedMedia
+
+_HTML_ATOM = re.compile(
+    r"<([a-z]+)\b[^>]*>.*?</\1\s*>|<[^>]*>|&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def format_caption(result: ScrapedMedia) -> str:
@@ -42,7 +49,18 @@ def format_text_post(result: ScrapedMedia) -> str:
 
 
 def truncate(text: str, max_len: int = 1024) -> str:
-    """Truncate text to fit within Telegram caption limits."""
+    """Limit captions without splitting entities or complete HTML elements.
+
+    For example, ``truncate('abcd&amp;more', 10)`` returns ``'abcd...'``.
+    """
+    if max_len < 0:
+        raise ValueError("max_len must be non-negative")
     if len(text) <= max_len:
         return text
-    return text[: max_len - 3] + "..."
+    suffix = "." * min(3, max_len)
+    cutoff = max_len - len(suffix)
+    for match in _HTML_ATOM.finditer(text):
+        if match.start() < cutoff < match.end():
+            cutoff = match.start()
+            break
+    return text[:cutoff] + suffix

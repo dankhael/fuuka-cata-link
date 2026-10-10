@@ -4,14 +4,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.scrapers import SCRAPERS
-from src.scrapers.base import MediaType
+from src.scrapers.base import MediaType, ScrapedMedia
 from src.scrapers.threads import ThreadsScraper
 from src.utils.link_detector import Platform, detect_links
 
 URL = "https://www.threads.com/@alice/post/ABC_123"
 
 
-async def extract_html(html: str, url: str = URL):
+async def extract_html(html: str, url: str = URL) -> ScrapedMedia:
     response = AsyncMock()
     response.raise_for_status = MagicMock()
     response.text.return_value = html
@@ -65,6 +65,7 @@ def test_detect_threads(domain, path):
         "https://threads.com/@alice",
         "https://threads.com/search?q=hello",
         "https://threads.com.evil.test/@alice/post/ABC_123",
+        "https://threads.com/@alice/post/ABC_123/media",
     ],
 )
 def test_ignore_non_posts(url):
@@ -174,3 +175,19 @@ async def test_http_failure():
         session.return_value.__aenter__ = AsyncMock(side_effect=TimeoutError)
         with pytest.raises(RuntimeError, match="all extraction methods failed"):
             await ThreadsScraper().extract(URL)
+
+
+async def test_short_permalink_extraction():
+    url = "https://www.threads.net/t/ABC_123/"
+    result = await extract_html(
+        post_html(
+            {
+                "code": "ABC_123",
+                "user": {"username": "alice"},
+                "caption": {"text": "Short permalink"},
+            }
+        ),
+        url,
+    )
+    assert result.original_url == url
+    assert result.caption == "Short permalink"

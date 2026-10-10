@@ -27,14 +27,6 @@ class DetectedLink:
 # Patterns for each platform. Order matters — first match wins for a given URL.
 _PLATFORM_PATTERNS: list[tuple[Platform, re.Pattern[str]]] = [
     (
-        Platform.THREADS,
-        re.compile(
-            r"https?://(?:www\.)?threads\.(?:net|com)/"
-            r"(?:@[\w.]+/post/|t/)[A-Za-z0-9_-]+/?(?:\?[^\s<>]*)?",
-            re.IGNORECASE,
-        ),
-    ),
-    (
         Platform.TWITTER,
         re.compile(
             r"https?://(?:www\.)?(?:twitter\.com|x\.com)/\S+/status/\d+",
@@ -52,6 +44,14 @@ _PLATFORM_PATTERNS: list[tuple[Platform, re.Pattern[str]]] = [
         Platform.INSTAGRAM,
         re.compile(
             r"https?://(?:www\.)?instagram\.com/(?:p|reel|reels)/\S+",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        Platform.THREADS,
+        re.compile(
+            r"https?://(?:www\.)?threads\.(?:net|com)/"
+            r"(?:@[\w.]+/post/|t/)[A-Za-z0-9_-]+/?(?![A-Za-z0-9_/-])(?:\?[^\s<>]*)?",
             re.IGNORECASE,
         ),
     ),

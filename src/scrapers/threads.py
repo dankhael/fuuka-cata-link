@@ -13,6 +13,9 @@ import aiohttp
 from src.scrapers.base import BaseScraper, MediaItem, MediaType, ScrapedMedia
 from src.utils.link_detector import Platform
 
+_THREADS_HOSTS = {"threads.net", "www.threads.net", "threads.com", "www.threads.com"}
+_EXPECTED_URL = "https://threads.{net,com}/@user/post/<code> or /t/<code>"
+
 _POST_PATH = re.compile(r"/(?:@[\w.]+/post/|t/)([A-Za-z0-9_-]+)/?$")
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -94,15 +97,25 @@ class ThreadsScraper(BaseScraper):
         return Platform.THREADS
 
     async def _primary_extract(self, url: str) -> ScrapedMedia:
+        match = self._validate_url(url)
+        page = await self._fetch_page(url)
+        result = self._from_page_data(page, match.group(1), url)
+        return result if result is not None else self._opengraph_fallback(page, url)
+
+    @staticmethod
+    def _validate_url(url: str) -> re.Match[str]:
         parsed = urlparse(url)
         match = _POST_PATH.fullmatch(parsed.path)
         if (
-            parsed.hostname
-            not in {"threads.net", "www.threads.net", "threads.com", "www.threads.com"}
+            parsed.scheme not in {"http", "https"}
+            or parsed.hostname not in _THREADS_HOSTS
             or not match
         ):
-            raise RuntimeError(f"Invalid Threads post URL: {url!r}")
+            raise RuntimeError(f"Invalid Threads post URL: {url!r} (expected {_EXPECTED_URL})")
+        return match
 
+    @staticmethod
+    async def _fetch_page(url: str) -> _ThreadsPage:
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 url,
@@ -114,27 +127,34 @@ class ThreadsScraper(BaseScraper):
 
         page = _ThreadsPage()
         page.feed(page_html)
+        return page
+
+    def _from_page_data(self, page: _ThreadsPage, shortcode: str, url: str) -> ScrapedMedia | None:
         for script in page.scripts:
             try:
                 payload = json.loads(script)
             except json.JSONDecodeError:
                 continue
-            post = _find_post(payload, match.group(1))
+            post = _find_post(payload, shortcode)
             if post is None:
                 continue
-            caption = (post.get("caption") or {}).get("text")
-            items = _media_items(post)
-            if not caption and not items:
-                raise RuntimeError(f"Threads post has no accessible content: {url!r}")
-            return ScrapedMedia(
-                platform=self.platform,
-                original_url=url,
-                author=escape(post["user"].get("username") or "") or None,
-                caption=escape(caption) if caption else None,
-                media_items=items,
-            )
+            return self._from_post(post, url)
+        return None
 
-        return self._opengraph_fallback(page, url)
+    def _from_post(self, post: dict, url: str) -> ScrapedMedia:
+        caption = (post.get("caption") or {}).get("text")
+        items = _media_items(post)
+        if not caption and not items:
+            raise RuntimeError(
+                f"Threads post has no accessible content: {url!r} (expected text or media)"
+            )
+        return ScrapedMedia(
+            platform=self.platform,
+            original_url=url,
+            author=escape(post["user"].get("username") or "") or None,
+            caption=escape(caption) if caption else None,
+            media_items=items,
+        )
 
     def _opengraph_fallback(self, page: _ThreadsPage, url: str) -> ScrapedMedia:
         # Require a post permalink so login/error pages and the site logo cannot
@@ -142,14 +162,16 @@ class ThreadsScraper(BaseScraper):
         canonical = urlparse(page.meta.get("og:url", ""))
         canonical_match = _POST_PATH.fullmatch(canonical.path)
         requested_match = _POST_PATH.fullmatch(urlparse(url).path)
-        if (
-            canonical.hostname
-            not in {"threads.net", "www.threads.net", "threads.com", "www.threads.com"}
-            or not canonical_match
-        ):
-            raise RuntimeError(f"Threads page contains no public post data: {url!r}")
+        if canonical.hostname not in _THREADS_HOSTS or not canonical_match:
+            raise RuntimeError(
+                f"Threads page contains no public post data: {url!r} "
+                f"(expected og:url matching {_EXPECTED_URL})"
+            )
         if not requested_match or canonical_match.group(1) != requested_match.group(1):
-            raise RuntimeError(f"Threads page metadata belongs to another post: {url!r}")
+            raise RuntimeError(
+                f"Threads page metadata belongs to another post: {url!r} "
+                "(expected the requested shortcode)"
+            )
 
         video = page.meta.get("og:video") or page.meta.get("og:video:url")
         image = page.meta.get("og:image")
@@ -161,7 +183,9 @@ class ThreadsScraper(BaseScraper):
             )
         caption = page.meta.get("og:description")
         if not caption and not items:
-            raise RuntimeError(f"Threads page contains no accessible content: {url!r}")
+            raise RuntimeError(
+                f"Threads page contains no accessible content: {url!r} (expected text or media)"
+            )
         return ScrapedMedia(
             platform=self.platform,
             original_url=url,
