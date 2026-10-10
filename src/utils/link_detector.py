@@ -10,6 +10,7 @@ class Platform(StrEnum):
     TWITTER = "twitter"
     YOUTUBE = "youtube"
     INSTAGRAM = "instagram"
+    THREADS = "threads"
     TIKTOK = "tiktok"
     FACEBOOK = "facebook"
     GITHUB = "github"
@@ -43,6 +44,14 @@ _PLATFORM_PATTERNS: list[tuple[Platform, re.Pattern[str]]] = [
         Platform.INSTAGRAM,
         re.compile(
             r"https?://(?:www\.)?instagram\.com/(?:p|reel|reels)/\S+",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        Platform.THREADS,
+        re.compile(
+            r"https?://(?:www\.)?threads\.(?:net|com)/"
+            r"(?:@[\w.]+/post/|t/)[A-Za-z0-9_-]+/?(?![A-Za-z0-9_/-])(?:\?[^\s<>]*)?",
             re.IGNORECASE,
         ),
     ),
@@ -112,7 +121,7 @@ def _clean_url(url: str, platform: Platform) -> str:
         cleaned = parsed._replace(query=urlencode(clean_query, doseq=True) if clean_query else "")
         return urlunparse(cleaned)
 
-    if platform == Platform.TIKTOK:
+    if platform in (Platform.TIKTOK, Platform.THREADS):
         # Strip query params like ?q=...&t=... that can break yt-dlp
         cleaned = parsed._replace(query="")
         return urlunparse(cleaned)

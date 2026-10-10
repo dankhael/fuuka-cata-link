@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html.parser import HTMLParser
 from unittest.mock import AsyncMock, patch
 
 from src.bot import handlers
@@ -133,6 +134,25 @@ async def test_send_single_result_spoilers_text_post():
     assert sent_text.startswith("<tg-spoiler>")
     assert sent_text.endswith("</tg-spoiler>")
     assert "secret" in sent_text
+
+
+async def test_spoiler_caption_limit_after_entity_parsing():
+    message = AsyncMock()
+    result = _result(caption="x" * 1100)
+    result.media_items[0].data = b"image"
+    with patch(
+        "src.bot.handlers.ensure_within_limit", new=AsyncMock(return_value=result.media_items)
+    ):
+        await handlers._send_single_result(message, result, has_spoiler=True)
+
+    caption = message.reply_photo.await_args.kwargs["caption"]
+    visible_parts: list[str] = []
+    parser = HTMLParser()
+    parser.handle_data = visible_parts.append
+    parser.feed(caption)
+    assert caption.startswith("<tg-spoiler>")
+    assert caption.endswith("</tg-spoiler>")
+    assert len("".join(visible_parts)) == 1024
 
 
 async def test_send_single_result_text_post_no_spoiler_unchanged():
