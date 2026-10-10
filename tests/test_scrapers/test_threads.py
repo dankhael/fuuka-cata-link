@@ -21,7 +21,9 @@ async def extract_html(html: str, url: str = URL) -> ScrapedMedia:
     session.__aenter__ = AsyncMock(return_value=session)
     session.__aexit__ = AsyncMock(return_value=False)
     with patch("src.scrapers.threads.aiohttp.ClientSession", return_value=session):
-        return await ThreadsScraper().extract(url)
+        result = await ThreadsScraper().extract(url)
+    assert session.get.call_args.kwargs["headers"]["User-Agent"] == "facebookexternalhit/1.1"
+    return result
 
 
 def post_html(post: dict) -> str:
@@ -191,3 +193,22 @@ async def test_short_permalink_extraction():
     )
     assert result.original_url == url
     assert result.caption == "Short permalink"
+
+
+async def test_opengraph_text_post_does_not_send_avatar():
+    result = await extract_html(
+        f'<meta property="og:url" content="{URL}">'
+        '<meta property="og:description" content="Text only">'
+        '<meta property="og:image" content="https://cdn.test/avatar.webp">'
+    )
+    assert result.caption == "Text only"
+    assert result.author == "alice"
+    assert result.media_items == []
+
+
+async def test_opengraph_avatar_alone_is_not_post_content():
+    with pytest.raises(RuntimeError, match="all extraction methods failed"):
+        await extract_html(
+            f'<meta property="og:url" content="{URL}">'
+            '<meta property="og:image" content="https://cdn.test/avatar.webp">'
+        )

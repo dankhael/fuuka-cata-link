@@ -74,6 +74,10 @@ class TestFormatTextPost:
 
 
 class TestTruncate:
+    def test_negative_limit_error_includes_value(self):
+        with pytest.raises(ValueError, match="got -1"):
+            truncate("hello", -1)
+
     @pytest.mark.parametrize("entity", ["&amp;", "&lt;", "&quot;", "&#39;", "&#x27;"])
     def test_entity_not_split(self, entity):
         for offset in range(1, len(entity)):

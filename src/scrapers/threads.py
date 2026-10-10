@@ -17,10 +17,9 @@ _THREADS_HOSTS = {"threads.net", "www.threads.net", "threads.com", "www.threads.
 _EXPECTED_URL = "https://threads.{net,com}/@user/post/<code> or /t/<code>"
 
 _POST_PATH = re.compile(r"/(?:@[\w.]+/post/|t/)([A-Za-z0-9_-]+)/?$")
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-)
+# Threads serves public post data to link-preview crawlers; a browser UA gets
+# a login page without post JSON or Open Graph metadata.
+_USER_AGENT = "facebookexternalhit/1.1"
 
 
 class _ThreadsPage(HTMLParser):
@@ -174,13 +173,9 @@ class ThreadsScraper(BaseScraper):
             )
 
         video = page.meta.get("og:video") or page.meta.get("og:video:url")
-        image = page.meta.get("og:image")
-        media_url = video if _is_http(video) else image
-        items = []
-        if _is_http(media_url):
-            items.append(
-                MediaItem(media_url, MediaType.VIDEO if media_url == video else MediaType.IMAGE)
-            )
+        # og:image can be the author's avatar, even on a text-only post.
+        # Only structured post data can reliably identify image attachments.
+        items = [MediaItem(video, MediaType.VIDEO)] if _is_http(video) else []
         caption = page.meta.get("og:description")
         if not caption and not items:
             raise RuntimeError(

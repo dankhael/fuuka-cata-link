@@ -54,7 +54,7 @@ def truncate(text: str, max_len: int = 1024) -> str:
     For example, ``truncate('abcd&amp;more', 10)`` returns ``'abcd...'``.
     """
     if max_len < 0:
-        raise ValueError("max_len must be non-negative")
+        raise ValueError(f"max_len must be non-negative, got {max_len!r}")
     if len(text) <= max_len:
         return text
     suffix = "." * min(3, max_len)
