@@ -9,6 +9,7 @@ Telegram bot that automatically extracts and reposts media from social media lin
 | Twitter / X | Tweets with images and videos |
 | YouTube Shorts | Short-form videos |
 | Instagram | Posts, reels, carousels |
+| Threads | Public text posts, images, videos, carousels (`threads.net` / `threads.com`) |
 | TikTok | Videos |
 | Facebook | Posts, reels |
 | GitHub | Commits, pull requests |
