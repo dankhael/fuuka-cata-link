@@ -8,10 +8,14 @@ import pytest
 from src.scrapers.base import MediaItem, MediaType
 from src.utils import media_handler
 from src.utils.media_handler import (
+    VideoProbe,
     _shrink_video,
+    audio_args,
     compress_video,
+    compress_video_crf,
     download_media,
     ensure_within_limit,
+    parse_probe,
     scale_filter,
     target_video_bitrate,
 )
@@ -63,6 +67,8 @@ def caps():
         cfg.download_timeout_seconds = 5
         cfg.min_video_bitrate_kbps = 500
         cfg.video_encode_preset = "veryfast"
+        cfg.send_cap_video_crf = 23
+        cfg.send_cap_video_preset = "superfast"
         yield cfg
 
 
@@ -121,7 +127,7 @@ async def test_compress_video_refuses_target_below_floor():
     encoder must not even start ffmpeg."""
     ffmpeg = AsyncMock()
     with (
-        patch.object(media_handler, "_get_video_duration", new=AsyncMock(return_value=600.0)),
+        patch.object(media_handler, "_probe_video", new=AsyncMock(return_value=VideoProbe(600.0))),
         patch.object(media_handler.asyncio, "create_subprocess_exec", new=ffmpeg),
     ):
         result = await compress_video(b"x" * MB, 10 * MB, min_video_bps=500_000)
@@ -156,7 +162,7 @@ async def test_compress_video_uses_configured_preset_and_no_upscale_filter(caps)
     output size."""
     ffmpeg = FakeFfmpeg()
     with (
-        patch.object(media_handler, "_get_video_duration", new=AsyncMock(return_value=30.0)),
+        patch.object(media_handler, "_probe_video", new=AsyncMock(return_value=VideoProbe(30.0))),
         patch.object(media_handler.asyncio, "create_subprocess_exec", new=ffmpeg),
     ):
         result = await compress_video(b"x" * MB, 10 * MB, max_height=480)
@@ -164,6 +170,65 @@ async def test_compress_video_uses_configured_preset_and_no_upscale_filter(caps)
     assert result == b"o" * 1024
     assert ffmpeg.argv[ffmpeg.argv.index("-preset") + 1] == "veryfast"
     assert ffmpeg.argv[ffmpeg.argv.index("-vf") + 1] == scale_filter(480)
+
+
+@pytest.mark.asyncio
+async def test_compress_video_crf_has_no_bitrate_and_copies_small_aac(caps):
+    """The Threads study's winning profile: constant quality, no -b:v target,
+    and the source's 87 kbps AAC copied instead of re-encoded to 128k."""
+    ffmpeg = FakeFfmpeg()
+    probe = VideoProbe(300.0, "aac", 87_000)
+    with (
+        patch.object(media_handler, "_probe_video", new=AsyncMock(return_value=probe)),
+        patch.object(media_handler.asyncio, "create_subprocess_exec", new=ffmpeg),
+    ):
+        result = await compress_video_crf(b"x" * MB, crf=23, preset="superfast")
+
+    assert result == b"o" * 1024
+    assert ffmpeg.argv[ffmpeg.argv.index("-crf") + 1] == "23"
+    assert ffmpeg.argv[ffmpeg.argv.index("-preset") + 1] == "superfast"
+    assert "-b:v" not in ffmpeg.argv
+    assert ffmpeg.argv[ffmpeg.argv.index("-c:a") + 1] == "copy"
+
+
+# ---------------------------------------------------------------------------
+# probe + audio: one ffprobe call, copy AAC only when it fits the budget
+# ---------------------------------------------------------------------------
+
+
+def test_parse_probe_reads_duration_and_first_audio_stream():
+    info = {
+        "format": {"duration": "300.116508"},
+        "streams": [{"codec_name": "aac", "bit_rate": "86799"}],
+    }
+    assert parse_probe(info) == VideoProbe(300.116508, "aac", 86_799)
+
+
+@pytest.mark.parametrize(
+    "streams",
+    [[], [{"codec_name": "aac"}], [{"codec_name": "aac", "bit_rate": "N/A"}]],
+)
+def test_parse_probe_tolerates_missing_audio_facts(streams):
+    probe = parse_probe({"format": {"duration": "10"}, "streams": streams})
+    assert probe.duration == 10.0
+    assert probe.audio_bps is None
+
+
+@pytest.mark.parametrize(
+    "probe",
+    [
+        VideoProbe(60.0, "aac", 256_000),  # would overshoot the 128k budget
+        VideoProbe(60.0, "aac", None),  # unknown bitrate: can't prove it fits
+        VideoProbe(60.0, "opus", 64_000),  # MP4 for Telegram wants AAC
+        VideoProbe(60.0),  # no audio stream
+    ],
+)
+def test_audio_args_reencodes_unless_aac_fits_budget(probe):
+    assert audio_args(probe) == ["-c:a", "aac", "-b:a", "128000"]
+
+
+def test_audio_args_copies_aac_within_budget():
+    assert audio_args(VideoProbe(60.0, "aac", 128_000)) == ["-c:a", "copy"]
 
 
 # ---------------------------------------------------------------------------
@@ -223,11 +288,49 @@ async def test_shrink_keeps_original_under_send_cap_when_floor_blocks_soft_targe
 
 
 @pytest.mark.asyncio
+async def test_shrink_uses_crf_output_when_it_fits_send_cap(caps):
+    """Oversized long clips go through CRF first; when it fits the cap, the
+    slower bitrate pass never runs."""
+    compressor = FakeCompressor({})
+    crf = AsyncMock(return_value=b"c" * 40 * MB)
+    with (
+        patch.object(media_handler, "compress_video", new=compressor),
+        patch.object(media_handler, "compress_video_crf", new=crf),
+    ):
+        result = await _shrink_video(b"v" * 54 * MB, SOFT, HARD)
+
+    assert len(result) == 40 * MB
+    assert [c[:2] for c in compressor.calls] == [(SOFT, 720), (SOFT, 480)]
+    crf.assert_awaited_once()
+    assert crf.await_args.kwargs == {"crf": 23, "preset": "superfast", "max_height": 720}
+
+
+@pytest.mark.asyncio
+async def test_shrink_skips_crf_when_disabled(caps):
+    caps.send_cap_video_crf = 0
+    compressor = FakeCompressor({(HARD, 720): b"s" * 45 * MB})
+    crf = AsyncMock()
+    with (
+        patch.object(media_handler, "compress_video", new=compressor),
+        patch.object(media_handler, "compress_video_crf", new=crf),
+    ):
+        result = await _shrink_video(b"v" * 80 * MB, SOFT, HARD)
+
+    assert len(result) == 45 * MB
+    crf.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_shrink_falls_back_to_send_cap_for_oversized_original(caps):
     """Regression for the 80MB Twitter videos: when 10MB would breach the
-    floor, aim at the 50MB send cap instead of dropping the video."""
+    floor, aim at the 50MB send cap instead of dropping the video — and CRF,
+    which doesn't bound bytes, must not let an over-cap file through."""
     compressor = FakeCompressor({(HARD, 720): b"s" * 45 * MB})
-    with patch.object(media_handler, "compress_video", new=compressor):
+    crf = AsyncMock(return_value=b"c" * 60 * MB)
+    with (
+        patch.object(media_handler, "compress_video", new=compressor),
+        patch.object(media_handler, "compress_video_crf", new=crf),
+    ):
         result = await _shrink_video(b"v" * 80 * MB, SOFT, HARD)
 
     assert len(result) == 45 * MB

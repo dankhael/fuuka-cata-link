@@ -67,6 +67,8 @@ Optional:
 - `MAX_DOWNLOAD_SIZE_MB` — ceiling on what gets downloaded for compression (default: 200)
 - `MIN_VIDEO_BITRATE_KBPS` — quality floor for the auto-download re-encode; see [Video size handling](#video-size-handling) (default: 500)
 - `VIDEO_ENCODE_PRESET` — x264 preset for the re-encode (default: `veryfast`; `medium` is slower and marginally sharper)
+- `SEND_CAP_VIDEO_CRF` — constant-quality level for the send-cap pass; lower is sharper and bigger, `0` disables it (default: 23)
+- `SEND_CAP_VIDEO_PRESET` — x264 preset for that CRF pass (default: `superfast`)
 - `DOWNLOAD_TIMEOUT_SECONDS` — download timeout (default: 30)
 - `CONCURRENT_DOWNLOADS` — max parallel downloads (default: 3)
 - `LOG_LEVEL` — logging level (default: INFO)
@@ -147,7 +149,11 @@ Videos go through a two-tier ffmpeg pipeline before being sent:
    stays above `MIN_VIDEO_BITRATE_KBPS` (60% of it for the 480p pass).
 2. If fitting 10 MB would breach that floor (long clips), the video is instead encoded to fit
    `MAX_FILE_SIZE_MB` at 720p — a bigger file that still looks good beats a tiny blurry one.
+   This pass encodes at constant quality first (`SEND_CAP_VIDEO_CRF`, `SEND_CAP_VIDEO_PRESET`);
+   CRF doesn't bound the size, so output still over the cap is re-encoded to fit it by bitrate.
    Originals already under the cap are sent untouched.
+
+AAC audio at or under 128 kbps is copied instead of re-encoded; anything else becomes 128k AAC.
 
 Anything still above `MAX_FILE_SIZE_MB` after both tiers is dropped and the chat is told the
 media is too large. `MAX_DOWNLOAD_SIZE_MB` bounds how much is pulled into memory for this in
