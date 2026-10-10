@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -189,6 +192,99 @@ async def test_compress_video_crf_has_no_bitrate_and_copies_small_aac(caps):
     assert ffmpeg.argv[ffmpeg.argv.index("-preset") + 1] == "superfast"
     assert "-b:v" not in ffmpeg.argv
     assert ffmpeg.argv[ffmpeg.argv.index("-c:a") + 1] == "copy"
+
+
+@pytest.mark.asyncio
+async def test_ffmpeg_maps_the_probed_streams(caps):
+    ffmpeg = FakeFfmpeg()
+    with (
+        patch.object(media_handler, "_probe_video", new=AsyncMock(return_value=VideoProbe(30.0))),
+        patch.object(media_handler.asyncio, "create_subprocess_exec", new=ffmpeg),
+    ):
+        await compress_video_crf(b"x" * MB, crf=23, preset="superfast")
+
+    maps = [ffmpeg.argv[i + 1] for i, arg in enumerate(ffmpeg.argv) if arg == "-map"]
+    assert maps == ["0:V:0", "0:a:0?"]
+
+
+def _ffprobe_audio(path: Path) -> list[dict[str, object]]:
+    out = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_streams",
+            "-select_streams",
+            "a",
+            str(path),
+        ],
+        capture_output=True,
+        check=True,
+    ).stdout
+    return json.loads(out)["streams"]
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg/ffprobe")
+@pytest.mark.asyncio
+async def test_copied_audio_is_the_probed_track(tmp_path):
+    """Regression (codex review of 0d43a49): ffprobe looked at a:0 (48k mono AAC)
+    but ffmpeg auto-picked a:1 (stereo, more channels) and copied it."""
+    source = tmp_path / "two_tracks.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=gray:s=64x64:d=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=f=440:d=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=f=880:d=1",
+            "-map",
+            "0",
+            "-map",
+            "1",
+            "-map",
+            "2",
+            "-c:v",
+            "libx264",
+            "-c:a:0",
+            "aac",
+            "-ac:a:0",
+            "1",
+            "-b:a:0",
+            "48k",
+            "-c:a:1",
+            "aac",
+            "-ac:a:1",
+            "2",
+            "-b:a:1",
+            "256k",
+            "-disposition:a:0",
+            "0",
+            "-disposition:a:1",
+            "default",
+            "-shortest",
+            str(source),
+        ],
+        check=True,
+    )
+    result = await compress_video_crf(source.read_bytes(), crf=30, preset="ultrafast")
+
+    assert result is not None
+    output = tmp_path / "out.mp4"
+    output.write_bytes(result)
+    audio = _ffprobe_audio(output)
+    assert [stream["channels"] for stream in audio] == [1]
 
 
 # ---------------------------------------------------------------------------

@@ -211,6 +211,14 @@ async def _run_ffmpeg(
         "-y",
         "-i",
         str(input_path),
+        # Pin the streams _probe_video inspected. ffmpeg's automatic selection
+        # takes the audio track with the most channels, so a "copy" decision made
+        # for a 48k mono a:0 could ship a 258k stereo a:1 and blow the budget.
+        # V (not v) skips cover-art pictures; the ? keeps silent clips working.
+        "-map",
+        "0:V:0",
+        "-map",
+        "0:a:0?",
         "-c:v",
         "libx264",
         *video_args,
