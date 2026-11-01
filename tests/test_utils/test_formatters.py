@@ -1,3 +1,5 @@
+import pytest
+
 from src.scrapers.base import MediaItem, MediaType, ScrapedMedia
 from src.utils.formatters import format_caption, format_text_post, truncate
 from src.utils.link_detector import Platform
@@ -72,6 +74,27 @@ class TestFormatTextPost:
 
 
 class TestTruncate:
+    def test_negative_limit_error_includes_value(self):
+        with pytest.raises(ValueError, match="got -1"):
+            truncate("hello", -1)
+
+    @pytest.mark.parametrize("entity", ["&amp;", "&lt;", "&quot;", "&#39;", "&#x27;"])
+    def test_entity_not_split(self, entity):
+        for offset in range(1, len(entity)):
+            assert truncate("abcd" + entity + "z" * 20, 7 + offset) == "abcd..."
+
+    def test_link_not_split(self):
+        text = 'hello <a href="https://threads.com/t/ABC">Link</a>'
+        assert truncate(text, 25) == "hello ..."
+
+    def test_threads_escaped_caption_at_default_limit(self):
+        text = "a" * 1020 + "&amp;" + "z" * 10
+        assert truncate(text) == "a" * 1020 + "..."
+
+    @pytest.mark.parametrize("limit", [0, 1, 2, 3])
+    def test_tiny_limit(self, limit):
+        assert truncate("long text", limit) == "." * limit
+
     def test_short_text_unchanged(self):
         assert truncate("hello", 100) == "hello"
 

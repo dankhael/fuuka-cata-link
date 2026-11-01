@@ -138,6 +138,7 @@ Eu extraio e reencaminho automaticamente mídias de links compartilhados neste c
 • Facebook (somente reels no momento)
 • GitHub (repositórios, PRs, issues)
 • Reddit
+• Threads (texto, imagens e vídeos)
 
 <b>Comandos:</b>
 /help — exibir esta mensagem

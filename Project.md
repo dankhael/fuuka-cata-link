@@ -217,6 +217,7 @@ LOG_FILE=logs/bot.log
 - [ ] Reddit
 - [ ] Facebook posts/reels
 - [ ] GitHub commits
+- [x] Threads (threads.net / threads.com) — public text posts, images, videos and carousels via page data, with Open Graph fallback
 
 ### Phase 3: Enhancements
 - [ ] Fallback chain implementation

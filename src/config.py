@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     # ~1.6x faster than medium at the same target bitrate for a ~0.1% SSIM
     # loss, so it is the default. Set to "medium" to get the old behaviour.
     video_encode_preset: str = "veryfast"
+    # Tier 2 (clips that can't reach the auto-download target at a watchable
+    # bitrate) encodes at constant quality instead of filling the 50MB cap: on a
+    # 5-min Threads clip superfast/CRF 23 was 34% faster and 12% smaller than the
+    # bitrate pass for -2.7 VMAF. Output over the cap falls back to the bitrate
+    # pass. Lower CRF = sharper and bigger; 0 disables CRF (bitrate pass only).
+    send_cap_video_crf: int = 23
+    send_cap_video_preset: str = "superfast"
     download_timeout_seconds: int = 30
     # Hard wall-clock ceiling per yt-dlp invocation. yt-dlp's own retries/socket
     # timeouts can stack into multi-minute hangs over a flaky proxy (DAN-80);

@@ -3,6 +3,7 @@ from src.scrapers.facebook import FacebookScraper
 from src.scrapers.github import GitHubScraper
 from src.scrapers.instagram import InstagramScraper
 from src.scrapers.reddit import RedditScraper
+from src.scrapers.threads import ThreadsScraper
 from src.scrapers.tiktok import TikTokScraper
 from src.scrapers.twitter import TwitterScraper
 from src.scrapers.youtube import YouTubeScraper
@@ -11,6 +12,7 @@ SCRAPERS: list[type[BaseScraper]] = [
     TwitterScraper,
     YouTubeScraper,
     InstagramScraper,
+    ThreadsScraper,
     TikTokScraper,
     FacebookScraper,
     GitHubScraper,
@@ -26,6 +28,7 @@ __all__ = [
     "TwitterScraper",
     "YouTubeScraper",
     "InstagramScraper",
+    "ThreadsScraper",
     "TikTokScraper",
     "FacebookScraper",
     "GitHubScraper",
