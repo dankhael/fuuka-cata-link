@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,6 +59,21 @@ _FAST_FAIL_ARGS = [
 
 def _fast_fail_args() -> list[str]:
     return [*_FAST_FAIL_ARGS, str(settings.download_timeout_seconds)]
+
+
+# -S sort for the retry: best stream whose shortest side is <= 480px, so it
+# picks the same quality for portrait reels and landscape videos.
+_SMALL_FORMAT_SORT = "res:480"
+
+# yt-dlp saves each stream of a merged download as "<name>.f<format_id>.<ext>"
+# and only writes "<name>.<ext>" once ffmpeg merges them. A lone part means the
+# merge never ran: --max-filesize aborted the video stream but yt-dlp still
+# fetched the audio, and that bare .m4a reached Telegram as a "photo"
+# (IMAGE_PROCESS_FAILED on a 10-min Instagram reel).
+_UNMERGED_PART = re.compile(r"^media\.f.+\.[^.]+$")
+
+# yt-dlp exits 0 when --max-filesize aborts a stream; this line is the only trace.
+_SIZE_ABORT = re.compile(rb"File is larger than max-filesize \((\d+) bytes")
 
 
 def expected_filesize(info: dict) -> int | None:
@@ -172,25 +188,56 @@ async def ytdlp_download(
     proxy. yt-dlp's own error text never identifies the proxy as the culprit,
     so callers that want a direct fallback must probe it themselves with
     ``src.utils.proxy.is_proxy_reachable``.
+
+    An over-limit download is retried once at up to 480p before it is given up
+    as ``exceeds_size_limit``.
+
+    Usage: ``result = await ytdlp_download(url, cookies_file=settings.cookies_file)``
     """
+    result = await _download_once(url, extra_args, cookies_file, proxy, format_sort=None)
+    if not result.exceeds_size_limit:
+        return result
+    # Extractors like Instagram's expose no duration or size per format, so the
+    # -f filesize filter can't steer away from a 400MB 1080p stream; only the
+    # HTTP response reveals it. A long reel's 358p stream still fits easily.
+    logger.info("ytdlp_retry_smaller_format", url=url, format_sort=_SMALL_FORMAT_SORT)
+    return await _download_once(
+        url, extra_args, cookies_file, proxy, format_sort=_SMALL_FORMAT_SORT
+    )
+
+
+def _download_cmd(output_template: str, format_sort: str | None) -> list[str]:
+    max_size = f"{settings.max_download_size_mb}M"
+    format_spec = f"bv*+ba[filesize<{max_size}]/bv*+ba/b[filesize<{max_size}]/b"
+    cmd = [
+        "yt-dlp",
+        "-o",
+        output_template,
+        "--no-playlist",
+        "-f",
+        format_spec,
+        "--max-filesize",
+        max_size,
+        "--write-info-json",
+        "--remote-components",
+        "ejs:github",
+        *_fast_fail_args(),
+    ]
+    if format_sort:
+        cmd.extend(["-S", format_sort])
+    return cmd
+
+
+async def _download_once(
+    url: str,
+    extra_args: list[str] | None,
+    cookies_file: str | None,
+    proxy: str | None,
+    *,
+    format_sort: str | None,
+) -> YtdlpResult:
     with tempfile.TemporaryDirectory() as tmpdir:
-        output_template = str(Path(tmpdir) / "media.%(ext)s")
-        max_size = f"{settings.max_download_size_mb}M"
-        format_spec = f"bv*+ba[filesize<{max_size}]/bv*+ba/b[filesize<{max_size}]/b"
-        cmd = [
-            "yt-dlp",
-            "-o",
-            output_template,
-            "--no-playlist",
-            "-f",
-            format_spec,
-            "--max-filesize",
-            max_size,
-            "--write-info-json",
-            "--remote-components",
-            "ejs:github",
-            *_fast_fail_args(),
-        ]
+        cmd = _download_cmd(str(Path(tmpdir) / "media.%(ext)s"), format_sort)
         # Cookies live in a subdirectory so yt-dlp's rewritten jar doesn't get
         # picked up as a downloaded media file below.
         cookie_flags, private_jar = await _cookie_args(tmpdir, cookies_file)
@@ -211,55 +258,77 @@ async def ytdlp_download(
             raise RuntimeError(
                 f"yt-dlp download failed: {redact_proxy_credentials(stderr.decode().strip())}"
             )
+        return _collect_download(Path(tmpdir), stdout)
 
-        # Find the downloaded media file and info json
-        tmppath = Path(tmpdir)
-        info_files = list(tmppath.glob("*.info.json"))
-        media_files = [
-            f for f in tmppath.iterdir() if f.is_file() and not f.name.endswith(".info.json")
-        ]
 
-        info: dict = {}
-        if info_files:
-            info = json.loads(info_files[0].read_text(encoding="utf-8"))
+def _collect_download(tmppath: Path, stdout: bytes) -> YtdlpResult:
+    """Turn yt-dlp's output directory into a result, flagging over-limit media."""
+    info_files = list(tmppath.glob("*.info.json"))
+    info: dict = json.loads(info_files[0].read_text(encoding="utf-8")) if info_files else {}
 
-        limit_bytes = settings.max_download_size_mb * 1024 * 1024
-        data: bytes | None = None
-        ext = "mp4"
-        exceeds_size_limit = False
-        if media_files:
-            media_file = media_files[0]
-            ext = media_file.suffix.lstrip(".")
-            file_size = media_file.stat().st_size
-            if file_size <= limit_bytes:
-                data = media_file.read_bytes()
-            else:
-                exceeds_size_limit = True
-                logger.warning("ytdlp_file_too_large", size_mb=round(file_size / 1024 / 1024, 1))
-        else:
-            # --max-filesize aborts *before* writing anything and still exits 0,
-            # leaving only the info json. Without this the caller can't tell an
-            # over-limit video from a broken download.
-            predicted = expected_filesize(info)
-            exceeds_size_limit = predicted is not None and predicted > limit_bytes
-            if exceeds_size_limit:
-                logger.warning(
-                    "ytdlp_download_aborted_too_large",
-                    size_mb=round(predicted / 1024 / 1024, 1),
-                )
+    data: bytes | None = None
+    ext = "mp4"
+    media_file = _finished_media_file(tmppath)
+    if media_file:
+        ext = media_file.suffix.lstrip(".")
+        data = _read_within_limit(media_file)
+        exceeds_size_limit = data is None
+    else:
+        # --max-filesize aborts *before* writing anything and still exits 0,
+        # leaving only the info json. Without this the caller can't tell an
+        # over-limit video from a broken download.
+        aborted_size = _aborted_size(stdout, info)
+        exceeds_size_limit = aborted_size is not None
+        if aborted_size is not None:
+            logger.warning("ytdlp_download_aborted_too_large", size_mb=_mb(aborted_size))
 
-        is_animation = ext in ("gif", "gifv")
-        is_video = ext in ("mp4", "webm", "mkv", "mov", "avi", "flv") and not is_animation
+    is_animation = ext in ("gif", "gifv")
+    is_video = ext in ("mp4", "webm", "mkv", "mov", "avi", "flv") and not is_animation
 
-        return YtdlpResult(
-            title=info.get("title"),
-            description=info.get("description"),
-            uploader=info.get("uploader") or info.get("channel") or info.get("creator"),
-            ext=ext,
-            data=data,
-            thumbnail_url=info.get("thumbnail"),
-            is_video=is_video,
-            is_animation=is_animation,
-            duration=info.get("duration"),
-            exceeds_size_limit=exceeds_size_limit,
-        )
+    return YtdlpResult(
+        title=info.get("title"),
+        description=info.get("description"),
+        uploader=info.get("uploader") or info.get("channel") or info.get("creator"),
+        ext=ext,
+        data=data,
+        thumbnail_url=info.get("thumbnail"),
+        is_video=is_video,
+        is_animation=is_animation,
+        duration=info.get("duration"),
+        exceeds_size_limit=exceeds_size_limit,
+    )
+
+
+def _finished_media_file(tmppath: Path) -> Path | None:
+    """The completed download, skipping the info json and unmerged stream parts."""
+    for f in tmppath.iterdir():
+        if f.is_file() and not f.name.endswith(".info.json") and not _UNMERGED_PART.match(f.name):
+            return f
+    return None
+
+
+def _read_within_limit(media_file: Path) -> bytes | None:
+    file_size = media_file.stat().st_size
+    if file_size > settings.max_download_size_mb * 1024 * 1024:
+        logger.warning("ytdlp_file_too_large", size_mb=_mb(file_size))
+        return None
+    return media_file.read_bytes()
+
+
+def _aborted_size(stdout: bytes, info: dict) -> int | None:
+    """Bytes of the stream yt-dlp refused on --max-filesize, or None if it didn't.
+
+    The size from yt-dlp's own abort line wins; the metadata estimate covers
+    output that lacks it (quiet runs, a future rewording upstream).
+    """
+    match = _SIZE_ABORT.search(stdout)
+    if match:
+        return int(match.group(1))
+    predicted = expected_filesize(info)
+    if predicted is not None and predicted > settings.max_download_size_mb * 1024 * 1024:
+        return predicted
+    return None
+
+
+def _mb(size_bytes: int) -> float:
+    return round(size_bytes / 1024 / 1024, 1)

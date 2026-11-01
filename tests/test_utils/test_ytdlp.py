@@ -102,9 +102,11 @@ class FakeRecordingRun:
 
     def __init__(self) -> None:
         self.cmd: list[str] = []
+        self.calls = 0
 
     async def __call__(self, cmd: list[str], *, what: str) -> tuple[int, bytes, bytes]:
         self.cmd = cmd
+        self.calls += 1
         outdir = Path(cmd[cmd.index("-o") + 1]).parent
         (outdir / "media.mp4").write_bytes(b"v" * 1024)
         return 0, b"", b""
@@ -211,3 +213,74 @@ async def test_info_probe_without_cookies_sends_no_cookie_flag():
 
     assert "--cookies" not in run.cmd
     assert "--cookies-from-browser" not in run.cmd
+
+
+_SIZE_ABORT_STDOUT = (
+    b"[download] File is larger than max-filesize (396941524 bytes > 209715200 bytes). "
+    b"Aborting.\n[download] Destination: media.fdash-1543570457288326a.m4a\n"
+)
+
+
+class FakeVideoAbortRun:
+    """A merged video+audio download whose video stream is over --max-filesize.
+
+    Like the real yt-dlp it exits 0, prints the abort, and still fetches the
+    audio stream, leaving only the unmerged "media.f<id>.m4a" part behind.
+    With ``fits_when_sorted`` the -S retry picks a smaller stream that fits.
+    """
+
+    def __init__(self, *, fits_when_sorted: bool) -> None:
+        self.fits_when_sorted = fits_when_sorted
+        self.cmds: list[list[str]] = []
+
+    async def __call__(self, cmd: list[str], *, what: str) -> tuple[int, bytes, bytes]:
+        self.cmds.append(cmd)
+        outdir = Path(cmd[cmd.index("-o") + 1]).parent
+        info = {"title": "long reel", "ext": "mp4", "vcodec": "vp09", "duration": None}
+        (outdir / "media.info.json").write_text(json.dumps(info), encoding="utf-8")
+        if "-S" in cmd and self.fits_when_sorted:
+            (outdir / "media.mp4").write_bytes(b"small video")
+            return 0, b"", b""
+        (outdir / "media.fdash-1543570457288326a.m4a").write_bytes(b"audio only")
+        return 0, _SIZE_ABORT_STDOUT, b""
+
+
+@pytest.mark.asyncio
+async def test_audio_left_over_from_an_aborted_video_is_not_returned_as_media():
+    """Regression: a 10-min Instagram reel's video stream hit --max-filesize,
+    yt-dlp still saved the audio, and the lone .m4a went to Telegram as a photo
+    (IMAGE_PROCESS_FAILED)."""
+    run = FakeVideoAbortRun(fits_when_sorted=False)
+    with patch("src.utils.ytdlp._run_ytdlp", new=run):
+        result = await ytdlp_download("https://www.instagram.com/reels/DYP8HUzMupB/")
+
+    assert result.data is None
+    assert result.exceeds_size_limit
+    assert result.title == "long reel"
+
+
+@pytest.mark.asyncio
+async def test_size_abort_retries_once_with_a_smaller_format():
+    """The same reel had a 358p stream (~50MB) that fit, so an oversized
+    download gets one retry capped at 480p before giving up."""
+    run = FakeVideoAbortRun(fits_when_sorted=True)
+    with patch("src.utils.ytdlp._run_ytdlp", new=run):
+        result = await ytdlp_download("https://www.instagram.com/reels/DYP8HUzMupB/")
+
+    assert result.data == b"small video"
+    assert result.is_video
+    assert not result.exceeds_size_limit
+    assert len(run.cmds) == 2
+    assert "-S" not in run.cmds[0]
+    assert run.cmds[1][run.cmds[1].index("-S") + 1] == "res:480"
+
+
+@pytest.mark.asyncio
+async def test_download_that_fits_runs_yt_dlp_once():
+    run = FakeRecordingRun()
+    with patch("src.utils.ytdlp._run_ytdlp", new=run):
+        result = await ytdlp_download("https://youtu.be/anyvideo")
+
+    assert result.data == b"v" * 1024
+    assert run.calls == 1
+    assert "-S" not in run.cmd
