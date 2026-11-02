@@ -5,15 +5,17 @@ import logging
 import sys
 from pathlib import Path
 
+import aiohttp
 import structlog
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from src.bot.handlers import router, setup_scrapers
+from src.bot.handlers import router, setup_scrapers, setup_twitter_mirror
 from src.bot.middlewares import LoggingMiddleware, RateLimitMiddleware
 from src.config import env_diagnostics, settings
 from src.utils.diagnostics import error_diagnostics_processor, performance_processor
+from src.utils.twitter_mirror import TwitterMirror, parse_hosts
 
 
 def configure_logging() -> None:
@@ -38,6 +40,16 @@ def configure_logging() -> None:
         logger_factory=structlog.PrintLoggerFactory(),
         cache_logger_on_first_use=True,
     )
+
+
+def start_twitter_mirror(session: aiohttp.ClientSession) -> asyncio.Task[None] | None:
+    """Start the background mirror probe; None when TWITTER_LINK_HOSTS is empty."""
+    hosts = parse_hosts(settings.twitter_link_hosts)
+    if not hosts:
+        return None
+    mirror = TwitterMirror(hosts)
+    setup_twitter_mirror(mirror)
+    return asyncio.create_task(mirror.keep_fresh(session))
 
 
 async def main() -> None:
@@ -73,10 +85,14 @@ async def main() -> None:
     me = await bot.get_me()
     log.info("bot_ready", bot_id=me.id, bot_username=me.username)
 
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
+    async with aiohttp.ClientSession() as http:
+        mirror_task = start_twitter_mirror(http)
+        try:
+            await dp.start_polling(bot)
+        finally:
+            if mirror_task:
+                mirror_task.cancel()
+            await bot.session.close()
 
 
 if __name__ == "__main__":

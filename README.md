@@ -62,6 +62,7 @@ Optional:
 - `ALLOWED_CHATS` — comma-separated chat IDs to restrict the bot to specific groups
 - `TWITTER_BEARER_TOKEN` — for Twitter API access
 - `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` — for Reddit API access
+- `TWITTER_LINK_HOSTS` — ordered, comma-separated Nitter-style mirrors for tweet caption links; the bot probes them every 10 minutes in the background and links to the first that answers, or to x.com when none does. Empty keeps plain x.com links (default: `nitter.tiekoetter.com,nitter.meowing.monster,nitter.netbub.com,nitter.privacyredirect.com,twiiit.com`)
 - `COOKIES_FILE` — path to a cookies.txt file for authenticated scraping (Instagram, Facebook, YouTube — see [docs/youtube-cookies.md](docs/youtube-cookies.md))
 - `COOKIES_STATE_DIR` — writable, persistent dir for the live copy of the jar that yt-dlp rotates (default: `logs`)
 - `MAX_FILE_SIZE_MB` — Telegram send cap; media still above it after compression is dropped (default: 50)

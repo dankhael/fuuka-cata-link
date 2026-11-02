@@ -23,6 +23,7 @@ from src.utils.formatters import format_caption, format_text_post, truncate
 from src.utils.link_detector import DetectedLink, Platform
 from src.utils.media_handler import download_media, ensure_within_limit
 from src.utils.translator import translate_to_portuguese
+from src.utils.twitter_mirror import TwitterMirror
 
 logger = structlog.get_logger()
 
@@ -30,6 +31,9 @@ router = Router(name="media")
 
 # Lazy-loaded scraper registry (populated in setup_scrapers)
 _SCRAPER_MAP: dict = {}
+
+# Mirror for caption tweet links (set in setup_twitter_mirror); None = plain x.com
+_TWITTER_MIRROR: TwitterMirror | None = None
 
 
 def setup_scrapers() -> None:
@@ -40,6 +44,12 @@ def setup_scrapers() -> None:
         instance = scraper_cls()
         _SCRAPER_MAP[instance.platform] = instance
     logger.info("scrapers_loaded", platforms=list(_SCRAPER_MAP.keys()))
+
+
+def setup_twitter_mirror(mirror: TwitterMirror | None) -> None:
+    """Point caption tweet links at *mirror*'s live host. Call once at startup."""
+    global _TWITTER_MIRROR
+    _TWITTER_MIRROR = mirror
 
 
 async def _process_links(
@@ -280,7 +290,7 @@ async def _send_single_result(
         await message.reply("Não consegui fazer o download da mídia deste link.")
         return None
 
-    caption = _wrap_spoiler(truncate(format_caption(result)), has_spoiler)
+    caption = _wrap_spoiler(truncate(format_caption(result, _TWITTER_MIRROR)), has_spoiler)
 
     send_start = time.monotonic()
 
