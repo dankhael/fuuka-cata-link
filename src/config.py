@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     telegram_bot_token: str
     allowed_chats: list[int] = Field(default_factory=list)
 
+    # Caption links for tweets go to the first of these Nitter-style mirrors that
+    # answered the last background probe (every 10 min), in this order; x.com
+    # when none did. Comma-separated; empty keeps plain x.com links.
+    twitter_link_hosts: str = (
+        "nitter.tiekoetter.com,nitter.meowing.monster,nitter.netbub.com,"
+        "nitter.privacyredirect.com,twiiit.com"
+    )
+
     # Optional API keys
     twitter_bearer_token: str | None = None
     reddit_client_id: str | None = None

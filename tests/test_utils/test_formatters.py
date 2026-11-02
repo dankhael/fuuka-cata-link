@@ -3,6 +3,7 @@ import pytest
 from src.scrapers.base import MediaItem, MediaType, ScrapedMedia
 from src.utils.formatters import format_caption, format_text_post, truncate
 from src.utils.link_detector import Platform
+from src.utils.twitter_mirror import TwitterMirror
 
 
 class TestFormatCaption:
@@ -50,6 +51,31 @@ class TestFormatCaption:
         # Should NOT contain plain "Source:" format
         assert "Source:" not in caption
         assert "Link</a>" in caption
+
+    def test_x_link_stays_on_x_without_a_mirror(self):
+        """Regression: x.com links were hard-rewritten to xcancel.com, which
+        has answered 451 "service suspended" since Sept 2026."""
+        result = ScrapedMedia(
+            platform=Platform.TWITTER,
+            original_url="https://x.com/dhh/status/1",
+            media_items=[MediaItem(url="http://img.jpg", media_type=MediaType.IMAGE)],
+        )
+
+        assert '<a href="https://x.com/dhh/status/1">Link</a>' in format_caption(result)
+
+    def test_x_link_points_at_the_active_mirror(self):
+        mirror = TwitterMirror(["nitter.a.com"])
+        mirror.active_host = "nitter.a.com"
+        result = ScrapedMedia(
+            platform=Platform.TWITTER,
+            original_url="https://x.com/dhh/status/1",
+            media_items=[MediaItem(url="http://img.jpg", media_type=MediaType.IMAGE)],
+        )
+
+        caption = format_caption(result, mirror=mirror)
+
+        assert '<a href="https://nitter.a.com/dhh/status/1">Link</a>' in caption
+        assert result.original_url == "https://x.com/dhh/status/1", "caption must not mutate"
 
 
 class TestFormatTextPost:

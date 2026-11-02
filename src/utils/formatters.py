@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from src.scrapers.base import ScrapedMedia
+from src.utils.twitter_mirror import TwitterMirror
 
 _HTML_ATOM = re.compile(
     r"<([a-z]+)\b[^>]*>.*?</\1\s*>|<[^>]*>|&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);",
@@ -10,8 +11,11 @@ _HTML_ATOM = re.compile(
 )
 
 
-def format_caption(result: ScrapedMedia) -> str:
+def format_caption(result: ScrapedMedia, mirror: TwitterMirror | None = None) -> str:
     """Build the Telegram caption for a scraped media result.
+
+    Pass *mirror* to point x.com links at its live Nitter-style host; without
+    one (or with none up) the link stays on the original URL.
 
     Format:
         [Caption/Description]
@@ -27,10 +31,11 @@ def format_caption(result: ScrapedMedia) -> str:
         parts.append(result.caption)
 
     if result.has_media:
-        # If the original url is from x.com, replace it with xcancel.com
-        if result.original_url.startswith("https://x.com/"):
-            result.original_url = result.original_url.replace("x.com/", "xcancel.com/")
-        parts.append(f'\n<a href="{result.original_url}">Link</a>')
+        # Logged-out readers can't open most x.com posts, so Twitter links go to
+        # a mirror. It used to be a hard-coded xcancel.com, suspended in Sept
+        # 2026; the mirror is now probed in the background (utils/twitter_mirror).
+        link = mirror.rewrite(result.original_url) if mirror else result.original_url
+        parts.append(f'\n<a href="{link}">Link</a>')
 
     return "\n".join(parts) if parts else result.original_url
 
