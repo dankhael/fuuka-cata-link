@@ -62,10 +62,26 @@ class FakeSession:
         return self._response
 
 
+class FakeRenditionSession:
+    """Serves a different response per URL; an Exception is raised on get()."""
+
+    def __init__(self, responses: dict[str, FakeResponse | Exception]) -> None:
+        self._responses = responses
+        self.requested: list[str] = []
+
+    def get(self, url: str, **kwargs) -> FakeResponse:
+        self.requested.append(url)
+        response = self._responses[url]
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
 @pytest.fixture
 def caps():
     with patch.object(media_handler, "settings") as cfg:
         cfg.max_download_size_mb = 100
+        cfg.auto_download_limit_mb = 10
         cfg.concurrent_downloads = 3
         cfg.download_timeout_seconds = 5
         cfg.min_video_bitrate_kbps = 500
@@ -112,6 +128,91 @@ async def test_download_skips_oversize_body_without_content_length(caps):
     result = await download_media([item], session=FakeSession(response))
 
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# download_media: lighter renditions
+# ---------------------------------------------------------------------------
+
+ORIGINAL, HD, SD = "https://v/4k.mp4", "https://v/720.mp4", "https://v/480.mp4"
+
+
+def _body(size_mb: int) -> FakeResponse:
+    return FakeResponse(b"v" * size_mb * MB, content_length=size_mb * MB)
+
+
+def _renditions_item() -> MediaItem:
+    return MediaItem(ORIGINAL, MediaType.VIDEO, lighter_urls=[HD, SD])
+
+
+@pytest.mark.asyncio
+async def test_download_uses_lighter_rendition_when_original_exceeds_cap(caps):
+    """Regression: a 90s 4K tweet (264MB) was dropped although Twitter also
+    serves it as a 14MB 720p MP4."""
+    original = FakeResponse(b"", content_length=264 * MB)
+    session = FakeRenditionSession({ORIGINAL: original, HD: _body(14)})
+    item = _renditions_item()
+
+    result = await download_media([item], session=session)
+
+    assert result == [item]
+    assert len(item.data) == 14 * MB
+    assert original.read_calls == 0
+    assert session.requested == [ORIGINAL, HD]
+
+
+@pytest.mark.asyncio
+async def test_download_keeps_original_that_can_be_sent_untouched(caps):
+    """A short 1080p clip must not lose quality to the 720p rendition."""
+    session = FakeRenditionSession({ORIGINAL: _body(9)})
+    item = _renditions_item()
+
+    await download_media([item], session=session)
+
+    assert len(item.data) == 9 * MB
+    assert session.requested == [ORIGINAL]
+
+
+@pytest.mark.asyncio
+async def test_download_prefers_rendition_over_reencoding_the_original(caps):
+    session = FakeRenditionSession({ORIGINAL: _body(60), HD: _body(8)})
+    item = _renditions_item()
+
+    await download_media([item], session=session)
+
+    assert len(item.data) == 8 * MB
+
+
+@pytest.mark.asyncio
+async def test_download_steps_down_until_a_rendition_fits_the_cap(caps):
+    session = FakeRenditionSession({ORIGINAL: _body(264), HD: _body(120), SD: _body(40)})
+    item = _renditions_item()
+
+    await download_media([item], session=session)
+
+    assert len(item.data) == 40 * MB
+
+
+@pytest.mark.asyncio
+async def test_download_returns_to_original_when_every_rendition_fails(caps):
+    gone = RuntimeError("404")
+    session = FakeRenditionSession({ORIGINAL: _body(60), HD: gone, SD: gone})
+    item = _renditions_item()
+
+    await download_media([item], session=session)
+
+    assert len(item.data) == 60 * MB
+
+
+@pytest.mark.asyncio
+async def test_download_compression_disabled_keeps_original_under_cap(caps):
+    caps.auto_download_limit_mb = 0
+    session = FakeRenditionSession({ORIGINAL: _body(60)})
+    item = _renditions_item()
+
+    await download_media([item], session=session)
+
+    assert len(item.data) == 60 * MB
 
 
 # ---------------------------------------------------------------------------

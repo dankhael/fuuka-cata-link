@@ -51,6 +51,9 @@ class MediaItem:
     url: str
     media_type: MediaType
     data: bytes | None = None  # downloaded content, filled by media_handler
+    # Smaller renditions of the same media, best first. media_handler falls back
+    # to them when `url` is too heavy to send untouched.
+    lighter_urls: list[str] = field(default_factory=list)
 
 
 @dataclass

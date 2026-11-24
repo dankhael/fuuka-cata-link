@@ -161,6 +161,10 @@ Anything still above `MAX_FILE_SIZE_MB` after both tiers is dropped and the chat
 media is too large. `MAX_DOWNLOAD_SIZE_MB` bounds how much is pulled into memory for this in
 the first place.
 
+Twitter serves each video in several sizes. When the original is too big to send untouched, the
+bot downloads the best rendition up to 720p instead of re-encoding a 1080p/4K file, stepping down
+if that one is over `MAX_DOWNLOAD_SIZE_MB` too. Originals that already fit are never swapped.
+
 The encoder never upscales: a 480p source stays 480p, so the bitrate budget goes to real
 pixels. `VIDEO_ENCODE_PRESET` picks the x264 speed/quality trade-off — on the production VPS
 (2 vCPUs) compression was ~46% of all request time, and `veryfast` cuts it by ~40% at the same

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.scrapers.base import MediaType
-from src.scrapers.twitter import TwitterScraper
+from src.scrapers.twitter import TwitterScraper, lighter_rendition_urls
 from src.utils.link_detector import Platform
 
 
@@ -387,3 +387,70 @@ async def test_twitter_gif_parsed_as_video():
 
     assert len(result.media_items) == 1
     assert result.media_items[0].media_type == MediaType.ANIMATION
+
+
+# ---------------------------------------------------------------------------
+# Lighter renditions
+# ---------------------------------------------------------------------------
+
+_TWIMG = "https://video.twimg.com/amplify_video/1/vid/avc1"
+
+
+def _mp4(resolution: str, bitrate: int) -> dict:
+    return {
+        "url": f"{_TWIMG}/{resolution}/v.mp4?tag=29",
+        "content_type": "video/mp4",
+        "bitrate": bitrate,
+    }
+
+
+def _portrait_4k_video() -> dict:
+    """Shape of the fxtwitter entry for x.com/rodrigofee2/status/2125300071910584520."""
+    return {
+        "type": "video",
+        "url": f"{_TWIMG}/2160x3840/v.mp4?tag=29",
+        "variants": [
+            {
+                "url": "https://video.twimg.com/amplify_video/1/pl/v.m3u8?tag=29",
+                "content_type": "application/x-mpegURL",
+                "bitrate": 0,
+            },
+            _mp4("320x568", 632_000),
+            _mp4("720x1280", 2_176_000),
+            _mp4("480x852", 950_000),
+            _mp4("1080x1920", 10_368_000),
+            _mp4("2160x3840", 25_128_000),
+        ],
+    }
+
+
+def test_lighter_renditions_cap_portrait_at_720p_best_first():
+    """Portrait is measured on its short side; HLS and >720p are left out."""
+    assert lighter_rendition_urls(_portrait_4k_video()) == [
+        f"{_TWIMG}/720x1280/v.mp4?tag=29",
+        f"{_TWIMG}/480x852/v.mp4?tag=29",
+        f"{_TWIMG}/320x568/v.mp4?tag=29",
+    ]
+
+
+def test_lighter_renditions_accept_landscape_and_skip_unsized_urls():
+    unsized = {"url": "https://video.twimg.com/x.mp4", "content_type": "video/mp4"}
+    video = {"variants": [_mp4("1920x1080", 9), _mp4("1280x590", 2), unsized]}
+
+    assert lighter_rendition_urls(video) == [f"{_TWIMG}/1280x590/v.mp4?tag=29"]
+
+
+@pytest.mark.parametrize("video", [{}, {"variants": None}, {"variants": []}])
+def test_lighter_renditions_empty_without_variants(video):
+    assert lighter_rendition_urls(video) == []
+
+
+@pytest.mark.parametrize("media_key", ["all", "videos"])
+def test_twitter_video_keeps_original_and_lists_lighter_renditions(media_key):
+    tweet = {"text": "4K", "media": {media_key: [_portrait_4k_video()]}}
+
+    result = TwitterScraper()._parse_tweet(tweet, "https://x.com/u/status/1")
+
+    (item,) = result.media_items
+    assert item.url == f"{_TWIMG}/2160x3840/v.mp4?tag=29"
+    assert item.lighter_urls[0] == f"{_TWIMG}/720x1280/v.mp4?tag=29"
