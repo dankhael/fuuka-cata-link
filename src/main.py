@@ -11,6 +11,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
+from src.bot.flood_retry import FloodRetryMiddleware
 from src.bot.handlers import router, setup_scrapers, setup_twitter_mirror
 from src.bot.middlewares import LoggingMiddleware, RateLimitMiddleware
 from src.config import env_diagnostics, settings
@@ -52,6 +53,17 @@ def start_twitter_mirror(session: aiohttp.ClientSession) -> asyncio.Task[None] |
     return asyncio.create_task(mirror.keep_fresh(session))
 
 
+def build_bot(token: str, flood_retry: FloodRetryMiddleware | None = None) -> Bot:
+    """Bot with HTML parsing that waits out flood control.
+
+    >>> build_bot("42:TOKEN").id
+    42
+    """
+    bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot.session.middleware(flood_retry or FloodRetryMiddleware())
+    return bot
+
+
 async def main() -> None:
     configure_logging()
     log = structlog.get_logger()
@@ -69,10 +81,7 @@ async def main() -> None:
 
     setup_scrapers()
 
-    bot = Bot(
-        token=settings.telegram_bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    bot = build_bot(settings.telegram_bot_token)
     dp = Dispatcher()
 
     # Register middlewares

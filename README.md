@@ -267,6 +267,7 @@ src/
   bot/
     handlers.py       # Message routing, media sending
     filters.py        # Link detection filter, chat whitelist
+    flood_retry.py     # Waits out Telegram flood control (429) and resends
     middlewares.py     # Logging, rate limiting (5 req/60s per user)
   scrapers/
     base.py           # BaseScraper ABC, ScrapedMedia/MediaItem dataclasses
