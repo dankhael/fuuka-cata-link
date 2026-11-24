@@ -34,6 +34,72 @@ def _mb(size_bytes: int) -> float:
     return round(size_bytes / 1024 / 1024, 1)
 
 
+def download_attempts(item: MediaItem) -> list[tuple[str, int]]:
+    """(url, max announced bytes) pairs to try in order for *item*.
+
+    The original only wins outright if it can be sent untouched. Above the
+    auto-download limit it would be re-encoded to 720p anyway, so a lighter
+    rendition is cheaper and is the only option for 4K uploads over the download
+    cap. The original goes last too, in case every rendition fails.
+
+    >>> item = MediaItem("https://v/4k.mp4", MediaType.VIDEO, lighter_urls=["https://v/hd.mp4"])
+    >>> [url for url, _ in download_attempts(item)]
+    ['https://v/4k.mp4', 'https://v/hd.mp4', 'https://v/4k.mp4']
+    """
+    cap = _download_cap_bytes()
+    if not item.lighter_urls:
+        return [(item.url, cap)]
+    # A limit <= 0 disables compression (see ensure_within_limit).
+    untouched = settings.auto_download_limit_mb * 1024 * 1024
+    first_limit = min(untouched, cap) if untouched > 0 else cap
+    lighter = [(url, cap) for url in item.lighter_urls]
+    return [(item.url, first_limit), *lighter, (item.url, cap)]
+
+
+async def _download_within(
+    session: aiohttp.ClientSession, url: str, announced_limit: int
+) -> bytes | None:
+    """Body of *url*, or None when it fails or is too large.
+
+    *announced_limit* gates on Content-Length; a body without one is already
+    paid for once read, so it only has to respect the download cap.
+    """
+    cap = _download_cap_bytes()
+    try:
+        async with session.get(
+            url, timeout=aiohttp.ClientTimeout(total=settings.download_timeout_seconds)
+        ) as resp:
+            resp.raise_for_status()
+            announced = resp.content_length
+            if announced is not None and announced > announced_limit:
+                _log_oversize(url, announced, announced_limit)
+                return None
+            body = await resp.read()
+    except Exception as exc:
+        logger.error("media_download_failed", url=url, error=str(exc))
+        return None
+    if len(body) > cap:
+        _log_oversize(url, len(body), cap)
+        return None
+    return body
+
+
+def _log_oversize(url: str, size_bytes: int, limit_bytes: int) -> None:
+    # Skipping the original for a lighter rendition is the plan, not a problem.
+    if limit_bytes < _download_cap_bytes():
+        logger.info("media_rendition_skipped", url=url, size_mb=_mb(size_bytes))
+        return
+    logger.warning("media_too_large", url=url, size_mb=_mb(size_bytes))
+
+
+async def _download_item(session: aiohttp.ClientSession, item: MediaItem) -> None:
+    """Fill ``item.data`` from the first attempt that fits."""
+    for url, announced_limit in download_attempts(item):
+        item.data = await _download_within(session, url, announced_limit)
+        if item.data is not None:
+            return
+
+
 async def download_media(
     items: list[MediaItem],
     session: aiohttp.ClientSession | None = None,
@@ -42,34 +108,18 @@ async def download_media(
 
     Items exceeding MAX_DOWNLOAD_SIZE_MB are skipped with a warning — before
     the transfer when the server announces a Content-Length, after it
-    otherwise. Fitting the Telegram send cap is `ensure_within_limit`'s job.
+    otherwise. Items with `lighter_urls` fall back to those first. Fitting the
+    Telegram send cap is `ensure_within_limit`'s job.
     """
     own_session = session is None
     if own_session:
         session = aiohttp.ClientSession()
 
     sem = asyncio.Semaphore(settings.concurrent_downloads)
-    cap = _download_cap_bytes()
 
     async def _fetch(item: MediaItem) -> None:
         async with sem:
-            try:
-                async with session.get(
-                    item.url,
-                    timeout=aiohttp.ClientTimeout(total=settings.download_timeout_seconds),
-                ) as resp:
-                    resp.raise_for_status()
-                    announced = resp.content_length
-                    if announced is not None and announced > cap:
-                        logger.warning("media_too_large", url=item.url, size_mb=_mb(announced))
-                        return
-                    data = await resp.read()
-                    if len(data) > cap:
-                        logger.warning("media_too_large", url=item.url, size_mb=_mb(len(data)))
-                        return
-                    item.data = data
-            except Exception as exc:
-                logger.error("media_download_failed", url=item.url, error=str(exc))
+            await _download_item(session, item)
 
     start = time.monotonic()
     try:

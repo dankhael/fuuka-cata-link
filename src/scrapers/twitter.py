@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from urllib.parse import urlparse, urlunparse
 
 import aiohttp
@@ -15,6 +16,47 @@ logger = structlog.get_logger()
 _FX_API_BASE = "https://api.fxtwitter.com"
 _FX_TIMEOUT = aiohttp.ClientTimeout(total=15)
 _FIXUPX_HOST = "fixupx.com"
+
+# twimg embeds the rendition size in the path: /vid/avc1/720x1280/<id>.mp4
+_TWIMG_RESOLUTION = re.compile(r"/(\d+)x(\d+)/")
+# media_handler re-encodes heavy videos down to this anyway.
+_MAX_RENDITION_SHORT_SIDE = 720
+
+
+def lighter_rendition_urls(video: dict) -> list[str]:
+    """MP4 variants of an fxtwitter video up to 720p, best bitrate first.
+
+    The size is measured on the short side so portrait clips aren't penalised.
+    HLS playlists are skipped: they aren't a file that can be downloaded directly.
+
+    >>> lighter_rendition_urls({"variants": [
+    ...     {"url": "https://v/1080x1920/a.mp4", "content_type": "video/mp4", "bitrate": 9},
+    ...     {"url": "https://v/720x1280/b.mp4", "content_type": "video/mp4", "bitrate": 2},
+    ... ]})
+    ['https://v/720x1280/b.mp4']
+    """
+    renditions = [
+        variant
+        for variant in video.get("variants") or []
+        if variant.get("content_type") == "video/mp4" and _fits_rendition_cap(variant["url"])
+    ]
+    renditions.sort(key=lambda variant: variant.get("bitrate") or 0, reverse=True)
+    return [variant["url"] for variant in renditions]
+
+
+def _fits_rendition_cap(url: str) -> bool:
+    match = _TWIMG_RESOLUTION.search(url)
+    if match is None:
+        return False
+    return min(int(match[1]), int(match[2])) <= _MAX_RENDITION_SHORT_SIDE
+
+
+def _video_item(video: dict) -> MediaItem:
+    return MediaItem(
+        url=video["url"],
+        media_type=MediaType.VIDEO,
+        lighter_urls=lighter_rendition_urls(video),
+    )
 
 
 def _to_fixupx_url(url: str) -> str:
@@ -122,7 +164,7 @@ class TwitterScraper(BaseScraper):
                 for photo in media_obj.get("photos", []):
                     media_items.append(MediaItem(url=photo["url"], media_type=MediaType.IMAGE))
                 for video in media_obj.get("videos", []):
-                    media_items.append(MediaItem(url=video["url"], media_type=MediaType.VIDEO))
+                    media_items.append(_video_item(video))
 
         author = None
         author_obj = tweet_data.get("author")
@@ -145,7 +187,7 @@ class TwitterScraper(BaseScraper):
         if item_type == "gif":
             return MediaItem(url=item["url"], media_type=MediaType.ANIMATION)
         if item_type == "video":
-            return MediaItem(url=item["url"], media_type=MediaType.VIDEO)
+            return _video_item(item)
         return MediaItem(url=item["url"], media_type=MediaType.IMAGE)
 
     async def _ytdlp_extract(self, url: str) -> ScrapedMedia:
